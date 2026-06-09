@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 
-export default function NearbyHosts({ onSendToHost }) {
+export default function NearbyHosts() {
     const { socket, isConnected } = useSocket();
     const [discoveredHosts, setDiscoveredHosts] = useState([]);
     const [isElectronHost, setIsElectronHost] = useState(false);
@@ -48,28 +48,23 @@ export default function NearbyHosts({ onSendToHost }) {
                 {discoveredHosts.map((host) => (
                     <div
                         key={host.id}
-                        className="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+                        className="flex items-center gap-2 p-3 bg-zinc-50 dark:bg-zinc-800 rounded-lg"
                     >
+                        <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Online" />
                         <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50 truncate">
                                 🖥️ {host.name}
                             </p>
-                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 truncate">
                                 {host.url}
                             </p>
                         </div>
-                        <button
-                            onClick={() => onSendToHost(host)}
-                            className="ml-3 px-3 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
-                        >
-                            Send →
-                        </button>
                     </div>
                 ))}
             </div>
 
             <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-4 text-center">
-                💡 Send files and messages directly to other Sharbee hosts
+                💡 These hosts are available on your network. To connect as a guest, restart the app and select "Connect as Guest" when prompted.
             </p>
         </div>
     );

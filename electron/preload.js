@@ -13,6 +13,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Server configuration (will be set by main process)
   serverPort: parseInt(process.env.SERVER_PORT || '8888'),
   isDev: process.env.NODE_ENV !== 'production',
+  // Connection mode
+  mode: process.env.APP_MODE || 'host', // 'host' or 'guest'
+  guestHostName: process.env.GUEST_HOST_NAME || null,
+  guestHostUrl: process.env.GUEST_HOST_URL || null,
+  // IPC methods for guest mode management
+  switchToHostMode: () => ipcRenderer.invoke('switch-to-host-mode'),
 });
 
 // Log that preload script has loaded

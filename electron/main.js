@@ -1,9 +1,8 @@
-const { app, BrowserWindow, dialog } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain } = require('electron');
 const path = require('path');
 const http = require('http');
 const express = require('express');
 const { Server } = require('socket.io');
-const { io: ioClient } = require('socket.io-client');
 const Bonjour = require('bonjour-service');
 const os = require('os');
 const fs = require('fs');
@@ -253,11 +252,17 @@ let bonjourInstance = null;
 let bonjourBrowser = null;
 let memoryState = null;
 let discoveredHosts = new Map(); // Store discovered Sharbee hosts
-let hostConnections = new Map(); // Socket connections to other hosts
+let appMode = 'host'; // 'host' or 'guest'
+let guestHostInfo = null; // Info about the host we're connected to as guest
 
 function createWindow() {
-  // Set environment variable for preload script
+  // Set environment variables for preload script
   process.env.SERVER_PORT = PORT.toString();
+  process.env.APP_MODE = appMode;
+  if (guestHostInfo) {
+    process.env.GUEST_HOST_NAME = guestHostInfo.name;
+    process.env.GUEST_HOST_URL = guestHostInfo.url;
+  }
   
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -271,17 +276,25 @@ function createWindow() {
       additionalArguments: [`--server-port=${PORT}`]
     },
     autoHideMenuBar: true,
-    title: 'Sharbee - Local File Transfer',
+    title: appMode === 'guest' ? `Sharbee - Connected to ${guestHostInfo?.name}` : 'Sharbee - Local File Transfer',
   });
 
   // Load the app
-  if (isDev) {
-    // In dev mode, use the same port as the server (Next.js dev)
+  if (appMode === 'guest') {
+    // Guest mode - connect to the host's server
+    console.log(`[Window] Loading as guest from ${guestHostInfo.url}`);
+    mainWindow.loadURL(guestHostInfo.url);
+  } else if (isDev) {
+    // Host mode in dev - use Next.js dev server
     mainWindow.loadURL(`http://localhost:${PORT}`);
     mainWindow.webContents.openDevTools();
   } else {
-    // In production, load static files
-    mainWindow.loadFile(path.join(__dirname, '../out/index.html'));
+    // Host mode in production - load from our Express server
+    setTimeout(() => {
+      const port = parseInt(process.env.ACTUAL_PORT || PORT);
+      mainWindow.loadURL(`http://localhost:${port}`);
+      console.log('[Electron] Loading production build from: http://localhost:' + port);
+    }, 500);
   }
 
   mainWindow.on('closed', () => {
@@ -464,8 +477,8 @@ async function startServer() {
       readStream.pipe(res);
     });
     
-    // Serve static Next.js export
-    expressApp.use(express.static(path.join(__dirname, '../out')));
+    // Serve static Next.js export from 'dist' folder
+    expressApp.use(express.static(path.join(__dirname, '../dist')));
     
     httpServer = http.createServer(expressApp);
   }
@@ -482,91 +495,6 @@ async function startServer() {
   });
 
   // ============================================
-  // HOST-TO-HOST COMMUNICATION
-  // ============================================
-  
-  // Connect to another host as a peer
-  function connectToHost(hostInfo) {
-    if (hostConnections.has(hostInfo.id)) {
-      return hostConnections.get(hostInfo.id);
-    }
-    
-    try {
-      const peerSocket = ioClient(hostInfo.url, {
-        transports: ['websocket', 'polling'],
-        reconnection: true,
-        reconnectionAttempts: 3
-      });
-      
-      peerSocket.on('connect', () => {
-        console.log(`[Federation] Connected to host: ${hostInfo.name}`);
-        // Register as a peer host (not a regular peer)
-        peerSocket.emit('register-peer', { 
-          name: `${os.hostname()} (Federation)`,
-          isPeerHost: true
-        });
-      });
-      
-      peerSocket.on('disconnect', () => {
-        console.log(`[Federation] Disconnected from host: ${hostInfo.name}`);
-        hostConnections.delete(hostInfo.id);
-      });
-      
-      hostConnections.set(hostInfo.id, peerSocket);
-      return peerSocket;
-    } catch (error) {
-      console.error(`[Federation] Failed to connect to ${hostInfo.name}:`, error);
-      return null;
-    }
-  }
-  
-  // Send message to another host
-  function sendMessageToHost(hostId, messageData) {
-    const hostInfo = discoveredHosts.get(hostId);
-    if (!hostInfo) {
-      return { success: false, error: 'Host not found' };
-    }
-    
-    const peerSocket = connectToHost(hostInfo);
-    if (!peerSocket) {
-      return { success: false, error: 'Could not connect to host' };
-    }
-    
-    peerSocket.emit('send-message', messageData);
-    return { success: true };
-  }
-  
-  // Send file to another host
-  function sendFileToHost(hostId, fileData) {
-    const hostInfo = discoveredHosts.get(hostId);
-    if (!hostInfo) {
-      return { success: false, error: 'Host not found' };
-    }
-    
-    const peerSocket = connectToHost(hostInfo);
-    if (!peerSocket) {
-      return { success: false, error: 'Could not connect to host' };
-    }
-    
-    // Send file metadata first
-    peerSocket.emit('send-file-offer', fileData.metadata);
-    
-    // Send file chunks
-    fileData.chunks.forEach(chunk => {
-      peerSocket.emit('send-file-chunk', chunk);
-    });
-    
-    // Send completion
-    peerSocket.emit('file-transfer-complete', {
-      id: fileData.metadata.id,
-      fileName: fileData.metadata.fileName,
-      sender: fileData.metadata.sender
-    });
-    
-    return { success: true };
-  }
-
-  // ============================================
   // SOCKET.IO EVENT HANDLERS
   // ============================================
   io.on('connection', (socket) => {
@@ -575,6 +503,14 @@ async function startServer() {
 
     // Register peer with timestamp
     socket.on('register-peer', (data) => {
+      // Federation connections only forward content between hosts. Don't list
+      // them as visible peers — it pollutes the peer list and causes extra
+      // peers-updated re-render churn on every host-to-host send.
+      if (data.isPeerHost) {
+        console.log(`[Socket] Federation peer connected (not listed): ${data.name}`);
+        return;
+      }
+
       memoryState.registerConnection(socket.id, data.name);
       
       // Send updated peer list to all clients
@@ -685,38 +621,6 @@ async function startServer() {
       }
     });
 
-    // Handle send-to-host requests
-    socket.on('send-message-to-host', (data) => {
-      const { hostId, message } = data;
-      const result = sendMessageToHost(hostId, message);
-      socket.emit('host-send-result', { 
-        type: 'message', 
-        hostId, 
-        success: result.success,
-        error: result.error 
-      });
-      
-      if (result.success) {
-        console.log(`[Federation] Message sent to host ${hostId}: ${message.message.substring(0, 30)}...`);
-      }
-    });
-    
-    socket.on('send-file-to-host', (data) => {
-      const { hostId, fileData } = data;
-      const result = sendFileToHost(hostId, fileData);
-      socket.emit('host-send-result', { 
-        type: 'file', 
-        hostId, 
-        fileName: fileData.metadata.fileName,
-        success: result.success,
-        error: result.error 
-      });
-      
-      if (result.success) {
-        console.log(`[Federation] File sent to host ${hostId}: ${fileData.metadata.fileName}`);
-      }
-    });
-    
     // Request list of discovered hosts
     socket.on('request-discovered-hosts', () => {
       socket.emit('hosts-discovered', Array.from(discoveredHosts.values()));
@@ -811,12 +715,6 @@ function startMDNS(localIP, port, mdnsName) {
         console.log(`📡 Host went offline: ${discoveredHosts.get(hostId).name}`);
         discoveredHosts.delete(hostId);
         
-        // Close connection if exists
-        if (hostConnections.has(hostId)) {
-          hostConnections.get(hostId).disconnect();
-          hostConnections.delete(hostId);
-        }
-        
         // Notify clients
         if (io) {
           io.emit('hosts-discovered', Array.from(discoveredHosts.values()));
@@ -831,6 +729,12 @@ function startMDNS(localIP, port, mdnsName) {
 }
 
 function stopServer() {
+  // Only stop server if we're running as host
+  if (appMode !== 'host') {
+    console.log('✅ Not hosting - no server to stop');
+    return;
+  }
+  
   // Stop mDNS browser
   if (bonjourBrowser) {
     bonjourBrowser.stop();
@@ -844,13 +748,6 @@ function stopServer() {
       console.log('✅ mDNS broadcasting stopped');
     });
   }
-  
-  // Close host-to-host connections
-  for (const [hostId, peerSocket] of hostConnections.entries()) {
-    peerSocket.disconnect();
-  }
-  hostConnections.clear();
-  console.log('✅ Host connections closed');
 
   if (io) {
     io.close();
@@ -864,10 +761,163 @@ function stopServer() {
 }
 
 // ============================================
+// HOST DETECTION & GUEST MODE
+// ============================================
+async function detectExistingHosts() {
+  return new Promise((resolve) => {
+    const hosts = [];
+    const bonjour = new Bonjour();
+    const browser = bonjour.find({ type: 'http' });
+    
+    console.log('[Startup] Scanning for existing Sharbee hosts...');
+    
+    browser.on('up', (service) => {
+      if (service.name && service.name.startsWith('Sharbee on')) {
+        const hostInfo = {
+          id: service.txt?.hostId || service.name,
+          name: service.txt?.hostname || service.name.replace('Sharbee on ', ''),
+          url: `http://${service.addresses[0]}:${service.port}`,
+          addresses: service.addresses,
+          port: service.port
+        };
+        hosts.push(hostInfo);
+        console.log(`[Startup] Found host: ${hostInfo.name} at ${hostInfo.url}`);
+      }
+    });
+    
+    // Wait 3 seconds for mDNS responses
+    setTimeout(() => {
+      browser.stop();
+      bonjour.destroy();
+      console.log(`[Startup] Scan complete. Found ${hosts.length} host(s)`);
+      resolve(hosts);
+    }, 3000);
+  });
+}
+
+async function showHostSelectionDialog(hosts) {
+  const hostList = hosts.map((h, i) => `${i + 1}. ${h.name} (${h.url})`).join('\n');
+  
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Sharbee - Connect or Host?',
+    message: `Found ${hosts.length} Sharbee host${hosts.length > 1 ? 's' : ''} on your network:`,
+    detail: `${hostList}\n\nWould you like to connect as a guest or start as a new host?`,
+    buttons: ['Connect as Guest', 'Start New Host', 'Cancel'],
+    defaultId: 0,
+    cancelId: 2
+  });
+  
+  if (choice === 2) {
+    // User cancelled
+    app.quit();
+    return null;
+  }
+  
+  if (choice === 0) {
+    // Connect as guest
+    if (hosts.length === 1) {
+      return { mode: 'guest', host: hosts[0] };
+    }
+    
+    // Multiple hosts - let user choose
+    const hostChoice = dialog.showMessageBoxSync({
+      type: 'question',
+      title: 'Select Host',
+      message: 'Which host would you like to connect to?',
+      detail: hostList,
+      buttons: hosts.map(h => h.name),
+      defaultId: 0
+    });
+    
+    return { mode: 'guest', host: hosts[hostChoice] };
+  }
+  
+  // Start as new host
+  return { mode: 'host', host: null };
+}
+
+// ============================================
+// IPC HANDLERS
+// ============================================
+ipcMain.handle('switch-to-host-mode', async () => {
+  console.log('[IPC] Received request to switch to host mode');
+  
+  // Show confirmation dialog
+  const choice = dialog.showMessageBoxSync({
+    type: 'question',
+    title: 'Host Disconnected',
+    message: 'The host you were connected to is no longer available.',
+    detail: 'Would you like to switch to host mode and start your own Sharbee server?',
+    buttons: ['Switch to Host Mode', 'Quit'],
+    defaultId: 0,
+    cancelId: 1
+  });
+  
+  if (choice === 1) {
+    // User chose to quit
+    app.quit();
+    return { success: false, action: 'quit' };
+  }
+  
+  // Switch to host mode
+  console.log('[IPC] Switching from guest to host mode...');
+  appMode = 'host';
+  guestHostInfo = null;
+  
+  // Start the server
+  await startServer();
+  
+  // Update environment variables
+  process.env.APP_MODE = 'host';
+  delete process.env.GUEST_HOST_NAME;
+  delete process.env.GUEST_HOST_URL;
+  
+  // Reload the window to the local server
+  if (mainWindow) {
+    const port = parseInt(process.env.ACTUAL_PORT || PORT);
+    mainWindow.setTitle('Sharbee - Local File Transfer');
+    mainWindow.loadURL(`http://localhost:${port}`);
+    console.log(`[IPC] Switched to host mode, loading from localhost:${port}`);
+  }
+  
+  return { success: true, action: 'switched' };
+});
+
+// ============================================
 // APP LIFECYCLE
 // ============================================
-app.whenReady().then(() => {
-  startServer();
+app.whenReady().then(async () => {
+  // Allow forcing host mode via command line flag (e.g. for development/testing)
+  const forceHost = process.argv.includes('--host');
+  
+  if (!forceHost) {
+    // Detect existing hosts on startup
+    const hosts = await detectExistingHosts();
+    
+    if (hosts.length > 0) {
+      // Found hosts - ask user what to do
+      const choice = await showHostSelectionDialog(hosts);
+      
+      if (!choice) {
+        // User cancelled
+        return;
+      }
+      
+      appMode = choice.mode;
+      guestHostInfo = choice.host;
+    }
+  } else {
+    console.log('[Startup] --host flag detected, skipping host scan');
+  }
+  
+  console.log(`[Startup] Starting in ${appMode} mode`);
+  
+  if (appMode === 'host') {
+    // Start as host (normal mode)
+    startServer();
+  }
+  
   createWindow();
 
   app.on('activate', () => {

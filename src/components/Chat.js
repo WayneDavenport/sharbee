@@ -10,8 +10,6 @@ export default function Chat() {
     const [inputMessage, setInputMessage] = useState('');
     const messagesEndRef = useRef(null);
     const [userName, setUserName] = useState('');
-    const [discoveredHosts, setDiscoveredHosts] = useState([]);
-    const [selectedHost, setSelectedHost] = useState(null);
 
     useEffect(() => {
         // Load username from localStorage
@@ -50,29 +48,11 @@ export default function Chat() {
             setMessages([]);
         });
 
-        // Listen for discovered hosts (Federation)
-        socket.on('hosts-discovered', (hosts) => {
-            setDiscoveredHosts(hosts);
-        });
-
-        // Listen for host send results
-        socket.on('host-send-result', (result) => {
-            if (result.type === 'message') {
-                if (result.success) {
-                    alert(`✅ Message sent to ${result.hostId}!`);
-                } else {
-                    alert(`❌ Failed to send message: ${result.error}`);
-                }
-            }
-        });
-
         return () => {
             socket.off('initial-sync');
             socket.off('sync-response');
             socket.off('receive-message');
             socket.off('history-cleared');
-            socket.off('hosts-discovered');
-            socket.off('host-send-result');
         };
     }, [socket]);
 
@@ -84,14 +64,13 @@ export default function Chat() {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     };
 
-    const sendMessage = (e, targetHostId = null) => {
+    const sendMessage = (e) => {
         if (e) e.preventDefault();
 
         if (!inputMessage.trim()) return;
         
-        // Allow sending if either connected to own server OR if there are discovered hosts
-        if (!socket || (!isConnected && discoveredHosts.length === 0)) {
-            alert('Not connected. Please wait for connection or host discovery.');
+        if (!socket || !isConnected) {
+            alert('Not connected. Please wait for connection.');
             return;
         }
 
@@ -102,16 +81,8 @@ export default function Chat() {
             timestamp: Date.now()
         };
 
-        if (targetHostId) {
-            // Send to specific host
-            socket.emit('send-message-to-host', { hostId: targetHostId, message });
-        } else {
-            // Broadcast to all
-            socket.emit('send-message', message);
-        }
-        
+        socket.emit('send-message', message);
         setInputMessage('');
-        setSelectedHost(null);
     };
 
     const formatTime = (timestamp) => {
@@ -181,48 +152,22 @@ export default function Chat() {
             </div>
 
             {/* Input */}
-            <div className="shrink-0">
-                {/* Host selector (if hosts available) */}
-                {discoveredHosts.length > 0 && (
-                    <div className="mb-2 flex items-center gap-2">
-                        <label className="text-xs text-zinc-600 dark:text-zinc-400">
-                            Send to:
-                        </label>
-                        <select
-                            value={selectedHost || ''}
-                            onChange={(e) => setSelectedHost(e.target.value || null)}
-                            className="px-2 py-1 text-xs bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded text-zinc-900 dark:text-zinc-50"
-                        >
-                            <option value="">Everyone (broadcast)</option>
-                            {discoveredHosts.map(host => (
-                                <option key={host.id} value={host.id}>
-                                    🖥️ {host.name}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                )}
-                
-                <form onSubmit={(e) => sendMessage(e, selectedHost)} className="flex gap-2">
-                    <input
-                        type="text"
-                        value={inputMessage}
-                        onChange={(e) => setInputMessage(e.target.value)}
-                        placeholder={isConnected || discoveredHosts.length > 0 ? "Type a message..." : "Connecting..."}
-                        disabled={!isConnected && discoveredHosts.length === 0}
-                        className="flex-1 px-4 py-3 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                    />
-                    <button
-                        type="submit"
-                        disabled={(!isConnected && discoveredHosts.length === 0) || !inputMessage.trim()}
-                        className={`px-6 py-3 text-white rounded-xl hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium ${
-                            selectedHost ? 'bg-green-600' : 'bg-blue-600'
-                        }`}
-                    >
-                        {selectedHost ? 'Send to Host' : 'Send'}
-                    </button>
-                </form>
-            </div>
+            <form onSubmit={sendMessage} className="flex gap-2 shrink-0">
+                <input
+                    type="text"
+                    value={inputMessage}
+                    onChange={(e) => setInputMessage(e.target.value)}
+                    placeholder={isConnected ? "Type a message..." : "Reconnecting..."}
+                    className="flex-1 px-4 py-3 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-50"
+                />
+                <button
+                    type="submit"
+                    disabled={!inputMessage.trim()}
+                    className="px-6 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-medium"
+                >
+                    Send
+                </button>
+            </form>
         </div>
     );
 }

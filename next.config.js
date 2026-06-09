@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export',
-  distDir: 'out',
+  distDir: 'dist', // Changed from 'out' to avoid conflict with Electron Forge
   images: {
     unoptimized: true,
   },

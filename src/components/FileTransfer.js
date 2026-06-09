@@ -10,8 +10,6 @@ export default function FileTransfer() {
     const [receivedFiles, setReceivedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
     const [uploadProgress, setUploadProgress] = useState({});
-    const [discoveredHosts, setDiscoveredHosts] = useState([]);
-    const [selectedHostForFile, setSelectedHostForFile] = useState({});
 
     useEffect(() => {
         if (!socket) return;
@@ -98,22 +96,6 @@ export default function FileTransfer() {
             pendingFiles.clear();
         });
 
-        // Listen for discovered hosts (Federation)
-        socket.on('hosts-discovered', (hosts) => {
-            setDiscoveredHosts(hosts);
-        });
-
-        // Listen for host send results
-        socket.on('host-send-result', (result) => {
-            if (result.type === 'file') {
-                if (result.success) {
-                    alert(`✅ File sent successfully to ${result.hostId}!`);
-                } else {
-                    alert(`❌ Failed to send file: ${result.error}`);
-                }
-            }
-        });
-
         return () => {
             socket.off('initial-sync');
             socket.off('sync-response');
@@ -122,8 +104,6 @@ export default function FileTransfer() {
             socket.off('file-received');
             socket.off('file-error');
             socket.off('history-cleared');
-            socket.off('hosts-discovered');
-            socket.off('host-send-result');
         };
     }, [socket]);
 
@@ -165,7 +145,7 @@ export default function FileTransfer() {
         setFiles(prev => [...prev, ...newFiles]);
     };
 
-    const sendFile = async (fileObj, targetHostId = null) => {
+    const sendFile = async (fileObj) => {
         if (!socket || !isConnected) {
             alert('Not connected to server');
             return;
@@ -180,44 +160,6 @@ export default function FileTransfer() {
             f.id === id ? { ...f, status: 'sending' } : f
         ));
 
-        // If sending to a specific host
-        if (targetHostId) {
-            // Collect file metadata
-            const metadata = {
-                id,
-                sender: localStorage.getItem('userName') || 'Anonymous',
-                fileName: file.name,
-                fileSize: file.size,
-                fileType: file.type,
-                timestamp: Date.now()
-            };
-
-            // Collect all chunks
-            const chunks = [];
-            while (offset < file.size) {
-                const chunk = file.slice(offset, offset + chunkSize);
-                const arrayBuffer = await chunk.arrayBuffer();
-                chunks.push({ id, chunk: arrayBuffer });
-                offset += chunkSize;
-                const progress = Math.min(100, Math.round((offset / file.size) * 100));
-                setUploadProgress(prev => ({ ...prev, [id]: progress }));
-            }
-
-            // Send to specific host
-            socket.emit('send-file-to-host', {
-                hostId: targetHostId,
-                fileData: { metadata, chunks }
-            });
-
-            // Update status
-            setFiles(prev => prev.map(f =>
-                f.id === id ? { ...f, status: 'sent' } : f
-            ));
-            setUploadProgress(prev => ({ ...prev, [id]: 100 }));
-            return;
-        }
-
-        // Normal broadcast to all
         // Send file metadata
         socket.emit('send-file-offer', {
             id,
@@ -304,10 +246,16 @@ export default function FileTransfer() {
         }
     };
 
+    const removeReceivedFile = (fileId) => {
+        if (confirm('Remove this file from the queue?')) {
+            setReceivedFiles(prev => prev.filter(f => f.id !== fileId));
+        }
+    };
+
     return (
-        <div className="h-full flex flex-col gap-6 overflow-y-auto md:overflow-hidden">
+        <div className="flex flex-col gap-6">
             {/* Upload Area */}
-            <div className="md:flex-1">
+            <div>
                 <h2 className="text-xl font-semibold mb-4 text-zinc-900 dark:text-zinc-50">
                     Send Files
                 </h2>
@@ -348,7 +296,7 @@ export default function FileTransfer() {
 
                 {/* File List */}
                 {files.length > 0 && (
-                    <div className="mt-4 space-y-2 md:max-h-64 md:overflow-y-auto pr-2">
+                    <div className="mt-4 space-y-2 pr-2" style={{ maxHeight: '16rem', overflowY: 'auto' }}>
                         {files.map((fileObj) => (
                             <div
                                 key={fileObj.id}
@@ -372,37 +320,13 @@ export default function FileTransfer() {
                                 </div>
                                 <div className="flex items-center gap-2 ml-4">
                                     {fileObj.status === 'ready' && (
-                                        <>
-                                            {/* Send to All button */}
-                                            <button
-                                                onClick={() => sendFile(fileObj)}
-                                                disabled={!isConnected}
-                                                className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                            >
-                                                Send to All
-                                            </button>
-                                            
-                                            {/* Send to Host dropdown (if hosts available) */}
-                                            {discoveredHosts.length > 0 && (
-                                                <select
-                                                    onChange={(e) => {
-                                                        if (e.target.value) {
-                                                            sendFile(fileObj, e.target.value);
-                                                            e.target.value = ''; // Reset
-                                                        }
-                                                    }}
-                                                    disabled={!isConnected}
-                                                    className="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 cursor-pointer"
-                                                >
-                                                    <option value="">Send to Host →</option>
-                                                    {discoveredHosts.map(host => (
-                                                        <option key={host.id} value={host.id}>
-                                                            {host.name}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </>
+                                        <button
+                                            onClick={() => sendFile(fileObj)}
+                                            disabled={!isConnected}
+                                            className="px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                        >
+                                            Send
+                                        </button>
                                     )}
                                     {fileObj.status === 'sent' && (
                                         <span className="text-sm text-green-600 dark:text-green-400 font-medium">✓ Sent</span>
@@ -426,7 +350,7 @@ export default function FileTransfer() {
             </div>
 
             {/* Received Files */}
-            <div className="md:flex-1 border-t border-zinc-200 dark:border-zinc-800 pt-6 md:overflow-y-auto">
+            <div className="border-t border-zinc-200 dark:border-zinc-800 pt-6">
                 <h2 className="text-xl font-semibold mb-4 text-zinc-900 dark:text-zinc-50">
                     Received Files
                 </h2>
@@ -436,7 +360,7 @@ export default function FileTransfer() {
                         <p>No files received yet</p>
                     </div>
                 ) : (
-                    <div className="space-y-2 pr-2">
+                    <div className="space-y-2 pr-2" style={{ maxHeight: '18rem', overflowY: 'auto' }}>
                         {receivedFiles.map((file) => (
                             <div
                                 key={file.id}
@@ -450,12 +374,21 @@ export default function FileTransfer() {
                                         From: {file.sender} • {formatFileSize(file.size)}
                                     </p>
                                 </div>
-                                <button
-                                    onClick={() => downloadFile(file)}
-                                    className="ml-4 px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                >
-                                    Download
-                                </button>
+                                <div className="flex items-center gap-2 ml-4">
+                                    <button
+                                        onClick={() => downloadFile(file)}
+                                        className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                                    >
+                                        Download
+                                    </button>
+                                    <button
+                                        onClick={() => removeReceivedFile(file.id)}
+                                        className="text-zinc-500 hover:text-red-600 transition-colors p-1"
+                                        title="Remove from queue"
+                                    >
+                                        ✕
+                                    </button>
+                                </div>
                             </div>
                         ))}
                     </div>

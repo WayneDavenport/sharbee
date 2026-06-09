@@ -156,9 +156,10 @@ export default function ConnectionInfo() {
                 <div>
                     <button
                         onClick={() => setShowQR(!showQR)}
-                        className="text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                        className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium text-sm flex items-center justify-center gap-2"
                     >
-                        {showQR ? '📱 Hide' : '📱 Show'} QR Code for Mobile
+                        <span>📱</span>
+                        <span>{showQR ? 'Hide' : 'Show'} QR Code for Mobile</span>
                     </button>
                     {showQR && qrCodeUrl && (
                         <div className="mt-3 flex flex-col items-center">

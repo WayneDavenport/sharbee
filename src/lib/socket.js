@@ -4,12 +4,16 @@ let socket = null;
 
 export const initSocket = () => {
     if (!socket) {
-        // Detect if running in Electron and get server port
+        // Detect if running in Electron and check mode
         const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
+        const mode = isElectron ? window.electronAPI?.mode : 'host';
+        const guestHostUrl = isElectron ? window.electronAPI?.guestHostUrl : null;
         const serverPort = isElectron ? (window.electronAPI?.serverPort || 8888) : undefined;
         
         console.log('[Socket Init] Environment:', {
             isElectron,
+            mode,
+            guestHostUrl,
             serverPort,
             hasElectronAPI: typeof window !== 'undefined' && !!window.electronAPI,
             electronAPIKeys: typeof window !== 'undefined' && window.electronAPI ? Object.keys(window.electronAPI) : []
@@ -17,11 +21,14 @@ export const initSocket = () => {
         
         // Determine Socket.io server URL
         let socketUrl;
-        if (isElectron && serverPort) {
-            // In Electron, connect to localhost on the configured port
+        if (isElectron && mode === 'guest' && guestHostUrl) {
+            // Guest mode - connect to the host's server
+            socketUrl = guestHostUrl;
+        } else if (isElectron && mode === 'host' && serverPort) {
+            // Host mode - connect to our own localhost server
             socketUrl = `http://localhost:${serverPort}`;
         } else {
-            // In browser, use current origin (dev mode or external browser)
+            // Browser - use current origin
             socketUrl = undefined; // Uses current origin by default
         }
         
@@ -31,7 +38,12 @@ export const initSocket = () => {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionDelay: 1000,
-            reconnectionAttempts: 5
+            reconnectionAttempts: Infinity,
+            reconnectionDelayMax: 5000
+        });
+
+        socket.on('reconnect_attempt', (attempt) => {
+            console.log('[Socket] Reconnect attempt', attempt);
         });
         
         console.log('[Socket Init] Socket instance created');
@@ -42,6 +54,10 @@ export const initSocket = () => {
 export const getSocket = () => {
     if (!socket) {
         return initSocket();
+    }
+    // Revive a singleton that was manually disconnected (won't auto-reconnect).
+    if (socket.disconnected) {
+        socket.connect();
     }
     return socket;
 };

@@ -2,10 +2,20 @@ module.exports = {
   packagerConfig: {
     name: 'Sharbee',
     executableName: 'sharbee',
-    icon: './assets/icon', // Add icon files: icon.icns (mac), icon.ico (win), icon.png (linux)
-    asar: true,
+    // icon: './assets/icon', // Commented out - add icons later
+    asar: false, // Disabled for debugging - files will be unpacked
     appBundleId: 'com.sharbee.app',
     appCategoryType: 'public.app-category.utilities',
+    // Exclude dev/build artifacts but keep all production dependencies
+    ignore: (path) => {
+      if (!path) return false;
+      // Exclude these folders (dev-time only)
+      if (path.startsWith('/.next')) return true;
+      if (path.startsWith('/src')) return true;
+      if (path.startsWith('/.git')) return true;
+      // Include everything else (dist, electron, node_modules, etc.)
+      return false;
+    },
     win32metadata: {
       CompanyName: 'Sharbee',
       FileDescription: 'Local File Transfer & Chat',
@@ -29,9 +39,9 @@ module.exports = {
         name: 'Sharbee',
         authors: 'Sharbee Team',
         description: 'Local file transfer and chat application',
-        setupIcon: './assets/icon.ico',
-        loadingGif: './assets/loading.gif',
-        iconUrl: 'https://example.com/icon.ico', // Update with actual URL
+        // setupIcon: './assets/icon.ico',
+        // loadingGif: './assets/loading.gif',
+        // iconUrl: 'https://example.com/icon.ico',
         setupExe: 'SharbeeSetup.exe'
       },
     },
@@ -45,7 +55,7 @@ module.exports = {
         options: {
           maintainer: 'Sharbee',
           homepage: 'https://github.com/yourusername/sharbee',
-          icon: './assets/icon.png',
+          // icon: './assets/icon.png',
           categories: ['Utility', 'Network'],
           description: 'Local file transfer and chat application for secure sharing over WiFi'
         },
@@ -56,7 +66,7 @@ module.exports = {
       config: {
         options: {
           homepage: 'https://github.com/yourusername/sharbee',
-          icon: './assets/icon.png',
+          // icon: './assets/icon.png',
           categories: ['Utility', 'Network'],
           description: 'Local file transfer and chat application'
         }

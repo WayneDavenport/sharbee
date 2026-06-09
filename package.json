@@ -6,13 +6,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "export": "next build && next export",
+    "export": "next build",
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint",
     "electron:dev": "electron .",
-    "electron:build": "npm run export && electron-forge make",
+    "electron:build": "npm run build && electron-forge make",
     "electron:start": "electron-forge start",
-    "package": "electron-forge package",
+    "package": "npm run build && electron-forge package",
     "make": "electron-forge make"
   },
   "dependencies": {

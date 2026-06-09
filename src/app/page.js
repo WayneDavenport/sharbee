@@ -5,12 +5,13 @@ import FileTransfer from '@/components/FileTransfer';
 import Chat from '@/components/Chat';
 import ConnectionInfo from '@/components/ConnectionInfo';
 import NearbyHosts from '@/components/NearbyHosts';
+import { useSocket } from '@/contexts/SocketContext';
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState('files');
   const [userName, setUserName] = useState('');
   const [isNameSet, setIsNameSet] = useState(false);
-  const [selectedHost, setSelectedHost] = useState(null);
+  const { isGuestMode, hostLost, isConnected } = useSocket();
 
   useEffect(() => {
     const savedName = localStorage.getItem('userName');
@@ -132,6 +133,24 @@ export default function Home() {
           </div>
         </div>
 
+        {/* Host-lost banner — only visible when running as a guest and the host dropped */}
+        {isGuestMode && hostLost && (
+          <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-xl text-amber-800 dark:text-amber-200">
+            <span className="text-xl">⚠️</span>
+            <div className="flex-1">
+              <p className="font-semibold text-sm">Host disconnected</p>
+              <p className="text-xs mt-0.5">
+                {isConnected
+                  ? 'Reconnected successfully.'
+                  : 'Attempting to reconnect… A dialog will appear shortly with your options.'}
+              </p>
+            </div>
+            {isConnected && (
+              <span className="text-xs font-medium text-green-600 dark:text-green-400">✓ Back online</span>
+            )}
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main Content Area */}
           <div className="lg:col-span-2">
@@ -159,7 +178,7 @@ export default function Home() {
               </div>
 
               {/* Tab Content */}
-              <div className="p-6 h-auto md:h-[calc(100vh-16rem)] overflow-y-auto md:overflow-hidden">
+              <div className="p-6 h-auto md:h-[calc(100vh-16rem)]">
                 <div style={{ display: activeTab === 'files' ? 'block' : 'none' }}>
                   <FileTransfer />
                 </div>
@@ -174,10 +193,7 @@ export default function Home() {
           <div className="lg:col-span-1 space-y-6">
             <ConnectionInfo />
             
-            <NearbyHosts onSendToHost={(host) => {
-              setSelectedHost(host);
-              alert(`Ready to send to ${host.name}!\nYou can now select "Send to Host" in Files or Chat tabs.`);
-            }} />
+            <NearbyHosts />
 
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm">
               <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-3">

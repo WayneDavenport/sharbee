@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { initSocket } from '@/lib/socket';
 
 const SocketContext = createContext(null);
@@ -10,46 +10,96 @@ export function SocketProvider({ children }) {
     const [isConnected, setIsConnected] = useState(false);
     const [peers, setPeers] = useState([]);
     const [serverUrl, setServerUrl] = useState('');
+    const [hostLost, setHostLost] = useState(false);
+
+    // Read guest mode directly from electronAPI — never changes at runtime so
+    // no need for state; a plain derived value is fine.
+    const isGuestMode =
+        typeof window !== 'undefined' && window.electronAPI?.mode === 'guest';
+
+    const switchTimerRef = useRef(null);
+    const switchDialogShownRef = useRef(false);
 
     useEffect(() => {
-        // Determine server URL based on environment
         const url = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
         setServerUrl(url);
 
         const socketInstance = initSocket();
         setSocket(socketInstance);
 
-        socketInstance.on('connect', () => {
-            console.log('[SocketContext] Connected to server');
-            console.log('[SocketContext] Socket ID:', socketInstance.id);
+        const handleConnect = () => {
+            console.log('[SocketContext] Connected. ID:', socketInstance.id);
             setIsConnected(true);
-        });
+            setHostLost(false);
 
-        socketInstance.on('disconnect', () => {
-            console.log('[SocketContext] Disconnected from server');
+            // Cancel any pending switch-to-host timer on reconnect
+            if (switchTimerRef.current) {
+                clearTimeout(switchTimerRef.current);
+                switchTimerRef.current = null;
+            }
+            switchDialogShownRef.current = false;
+        };
+
+        const handleDisconnect = (reason) => {
+            console.log('[SocketContext] Disconnected. Reason:', reason);
             setIsConnected(false);
-        });
 
-        socketInstance.on('peers-updated', (updatedPeers) => {
+            if (!isGuestMode) return;
+
+            // Show the in-app "host lost" banner immediately
+            setHostLost(true);
+            console.log('[SocketContext] Guest: host lost. Waiting 6s before offering switch...');
+
+            // After 6 seconds, if still disconnected, trigger the switch dialog.
+            // Socket.io only fires 'disconnect' once per connection loss (then it
+            // silently retries), so we must use a timer rather than a counter.
+            if (!switchDialogShownRef.current) {
+                switchDialogShownRef.current = true;
+                switchTimerRef.current = setTimeout(() => {
+                    switchTimerRef.current = null;
+                    if (!socketInstance.connected && window.electronAPI?.switchToHostMode) {
+                        console.log('[SocketContext] Triggering switch-to-host dialog');
+                        window.electronAPI.switchToHostMode()
+                            .then(result => console.log('[SocketContext] Switch result:', result))
+                            .catch(err => console.error('[SocketContext] Switch error:', err));
+                    }
+                }, 6000);
+            }
+        };
+
+        const handlePeersUpdated = (updatedPeers) => {
             console.log('[SocketContext] Peers updated:', updatedPeers);
             setPeers(updatedPeers);
-        });
+        };
 
-        socketInstance.on('connect_error', (error) => {
-            console.error('[SocketContext] Connection error:', error);
-            console.error('[SocketContext] Error message:', error.message);
-        });
+        const handleConnectError = (error) => {
+            console.error('[SocketContext] Connection error:', error.message);
+        };
 
-        // Log initial connection state
-        console.log('[SocketContext] Socket initialized. Connected:', socketInstance.connected);
+        socketInstance.on('connect', handleConnect);
+        socketInstance.on('disconnect', handleDisconnect);
+        socketInstance.on('peers-updated', handlePeersUpdated);
+        socketInstance.on('connect_error', handleConnectError);
+
+        if (socketInstance.connected) {
+            console.log('[SocketContext] Already connected on mount');
+            setIsConnected(true);
+        } else if (!socketInstance.active) {
+            console.log('[SocketContext] Socket idle on mount, reconnecting');
+            socketInstance.connect();
+        }
 
         return () => {
-            socketInstance.disconnect();
+            socketInstance.off('connect', handleConnect);
+            socketInstance.off('disconnect', handleDisconnect);
+            socketInstance.off('peers-updated', handlePeersUpdated);
+            socketInstance.off('connect_error', handleConnectError);
+            if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
         };
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     return (
-        <SocketContext.Provider value={{ socket, isConnected, peers, serverUrl }}>
+        <SocketContext.Provider value={{ socket, isConnected, peers, serverUrl, isGuestMode, hostLost }}>
             {children}
         </SocketContext.Provider>
     );
