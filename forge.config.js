@@ -39,38 +39,12 @@ module.exports = {
         name: 'Sharbee',
         authors: 'Sharbee Team',
         description: 'Local file transfer and chat application',
-        // setupIcon: './assets/icon.ico',
-        // loadingGif: './assets/loading.gif',
-        // iconUrl: 'https://example.com/icon.ico',
         setupExe: 'SharbeeSetup.exe'
       },
     },
     {
       name: '@electron-forge/maker-zip',
       platforms: ['darwin', 'linux', 'win32'],
-    },
-    {
-      name: '@electron-forge/maker-deb',
-      config: {
-        options: {
-          maintainer: 'Sharbee',
-          homepage: 'https://github.com/yourusername/sharbee',
-          // icon: './assets/icon.png',
-          categories: ['Utility', 'Network'],
-          description: 'Local file transfer and chat application for secure sharing over WiFi'
-        },
-      },
-    },
-    {
-      name: '@electron-forge/maker-rpm',
-      config: {
-        options: {
-          homepage: 'https://github.com/yourusername/sharbee',
-          // icon: './assets/icon.png',
-          categories: ['Utility', 'Network'],
-          description: 'Local file transfer and chat application'
-        }
-      },
     },
   ],
   plugins: [],

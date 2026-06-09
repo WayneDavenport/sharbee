@@ -10,6 +10,8 @@ export default function FileTransfer() {
     const [receivedFiles, setReceivedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
     const [uploadProgress, setUploadProgress] = useState({});
+    const [downloadingFiles, setDownloadingFiles] = useState(new Set());
+    const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
 
     useEffect(() => {
         if (!socket) return;
@@ -208,20 +210,48 @@ export default function FileTransfer() {
     };
 
     const removeFile = (id) => {
-        setFiles(prev => prev.filter(f => f.id !== id));
-        setUploadProgress(prev => {
-            const newProgress = { ...prev };
-            delete newProgress[id];
-            return newProgress;
-        });
+        const fileToRemove = files.find(f => f.id === id);
+        
+        // If file was sent, allow it to be resent instead of removing
+        if (fileToRemove && fileToRemove.status === 'sent') {
+            setFiles(prev => prev.map(f =>
+                f.id === id ? { ...f, status: 'ready' } : f
+            ));
+            setUploadProgress(prev => {
+                const newProgress = { ...prev };
+                delete newProgress[id];
+                return newProgress;
+            });
+        } else {
+            // For unsent files, remove them
+            setFiles(prev => prev.filter(f => f.id !== id));
+            setUploadProgress(prev => {
+                const newProgress = { ...prev };
+                delete newProgress[id];
+                return newProgress;
+            });
+        }
     };
 
     const downloadFile = async (file) => {
+        // Check if already downloading
+        if (downloadingFiles.has(file.id)) return;
+
+        // Warn about large files
+        const fileSizeInMB = file.size / (1024 * 1024);
+        if (fileSizeInMB > 1 && !downloadingFiles.has(file.id)) {
+            setShowLargeFileWarning(true);
+            setTimeout(() => setShowLargeFileWarning(false), 5000);
+        }
+
         try {
+            // Mark as downloading
+            setDownloadingFiles(prev => new Set(prev).add(file.id));
+
             // Use the server-provided download URL
             const downloadUrl = serverUrl + file.downloadUrl;
             
-            // Fetch the file as a blob
+            // Fetch the file as a blob (this is where the delay happens for large files)
             const response = await fetch(downloadUrl);
             if (!response.ok) {
                 throw new Error('Download failed');
@@ -243,6 +273,13 @@ export default function FileTransfer() {
         } catch (error) {
             console.error('Download error:', error);
             alert('Failed to download file. Please try again.');
+        } finally {
+            // Remove from downloading set
+            setDownloadingFiles(prev => {
+                const newSet = new Set(prev);
+                newSet.delete(file.id);
+                return newSet;
+            });
         }
     };
 
@@ -252,19 +289,48 @@ export default function FileTransfer() {
         }
     };
 
+    const clearSentFiles = () => {
+        const sentCount = files.filter(f => f.status === 'sent').length;
+        if (sentCount === 0) return;
+        
+        if (confirm(`Clear ${sentCount} sent file(s) from the list?`)) {
+            setFiles(prev => prev.filter(f => f.status !== 'sent'));
+        }
+    };
+
     return (
         <div className="flex flex-col gap-6">
+            {/* Large File Warning Banner */}
+            {showLargeFileWarning && (
+                <div className="flex items-center gap-3 px-4 py-3 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700 rounded-xl text-amber-800 dark:text-amber-200 text-sm">
+                    <span className="text-lg">⏳</span>
+                    <p>
+                        <strong>Large file detected!</strong> Files over 1MB may take 30-60 seconds to prepare for download. Please wait for the download to start.
+                    </p>
+                </div>
+            )}
+
             {/* Upload Area */}
             <div>
-                <h2 className="text-xl font-semibold mb-4 text-zinc-900 dark:text-zinc-50">
-                    Send Files
-                </h2>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+                        Send Files
+                    </h2>
+                    {files.some(f => f.status === 'sent') && (
+                        <button
+                            onClick={clearSentFiles}
+                            className="text-xs px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
+                        >
+                            Clear Sent ({files.filter(f => f.status === 'sent').length})
+                        </button>
+                    )}
+                </div>
 
                 <div
                     onDragOver={handleDragOver}
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop}
-                    className={`border-2 border-dashed rounded-xl p-8 text-center transition-all ${isDragging
+                    className={`border-2 border-dashed rounded-xl p-4 text-center transition-all ${isDragging
                         ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/20'
                         : 'border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-600'
                         }`}
@@ -277,26 +343,25 @@ export default function FileTransfer() {
                         className="hidden"
                     />
 
-                    <div className="flex flex-col items-center gap-3">
-                        <svg className="w-12 h-12 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="flex items-center justify-center gap-4">
+                        <svg className="w-8 h-8 text-zinc-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                         </svg>
-                        <p className="text-lg font-medium text-zinc-700 dark:text-zinc-300">
+                        <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                             Drag and drop files here
                         </p>
-                        <p className="text-sm text-zinc-500 dark:text-zinc-400">or</p>
                         <label
                             htmlFor="fileInput"
-                            className="px-6 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors"
+                            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg cursor-pointer hover:bg-blue-700 transition-colors shrink-0"
                         >
-                            Browse Files
+                            Browse
                         </label>
                     </div>
                 </div>
 
                 {/* File List */}
                 {files.length > 0 && (
-                    <div className="mt-4 space-y-2 pr-2" style={{ maxHeight: '16rem', overflowY: 'auto' }}>
+                    <div className="mt-4 space-y-2 pr-2" style={{ maxHeight: '35vh', overflowY: 'auto' }}>
                         {files.map((fileObj) => (
                             <div
                                 key={fileObj.id}
@@ -339,8 +404,9 @@ export default function FileTransfer() {
                                     <button
                                         onClick={() => removeFile(fileObj.id)}
                                         className="text-zinc-500 hover:text-red-600 transition-colors"
+                                        title={fileObj.status === 'sent' ? 'Click to reset and resend' : 'Remove from queue'}
                                     >
-                                        ✕
+                                        {fileObj.status === 'sent' ? '↻' : '✕'}
                                     </button>
                                 </div>
                             </div>
@@ -360,7 +426,7 @@ export default function FileTransfer() {
                         <p>No files received yet</p>
                     </div>
                 ) : (
-                    <div className="space-y-2 pr-2" style={{ maxHeight: '18rem', overflowY: 'auto' }}>
+                    <div className="space-y-2 pr-2" style={{ maxHeight: '35vh', overflowY: 'auto' }}>
                         {receivedFiles.map((file) => (
                             <div
                                 key={file.id}
@@ -377,9 +443,20 @@ export default function FileTransfer() {
                                 <div className="flex items-center gap-2 ml-4">
                                     <button
                                         onClick={() => downloadFile(file)}
-                                        className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                                        disabled={downloadingFiles.has(file.id)}
+                                        className="px-4 py-1.5 text-sm bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                                     >
-                                        Download
+                                        {downloadingFiles.has(file.id) ? (
+                                            <>
+                                                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                                </svg>
+                                                <span>Loading...</span>
+                                            </>
+                                        ) : (
+                                            'Download'
+                                        )}
                                     </button>
                                     <button
                                         onClick={() => removeReceivedFile(file.id)}
