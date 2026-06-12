@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "main": "electron/main.js",
+  "repository": "https://github.com/WayneDavenport/sharbee",
   "scripts": {
     "dev": "next dev",
     "build": "next build",

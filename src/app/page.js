@@ -7,6 +7,7 @@ import ConnectionInfo from '@/components/ConnectionInfo';
 import NearbyHosts from '@/components/NearbyHosts';
 import KebabMenu from '@/components/KebabMenu';
 import DownloadsDropdown from '@/components/DownloadsDropdown';
+import UpdateBadge from '@/components/UpdateBadge';
 import ToastContainer from '@/components/Toast';
 import TroubleshootingModal from '@/components/modals/TroubleshootingModal';
 import ContactModal from '@/components/modals/ContactModal';
@@ -176,6 +177,9 @@ export default function Home() {
             </button>
 
             <div className="h-5 w-px bg-zinc-200 dark:bg-zinc-700 hidden sm:block" />
+
+            {/* Update badge — only visible when a download is staged and ready */}
+            <UpdateBadge />
 
             {/* Downloads dropdown */}
             <DownloadsDropdown />

@@ -70,6 +70,63 @@ if (process.platform === 'win32') {
 }
 
 // ============================================
+// AUTO-UPDATER
+// ============================================
+// Skipped for Windows Store (process.windowsStore) and Mac App Store (process.mas)
+// builds — both stores manage their own delivery and reject apps that self-update.
+// Also skipped in dev mode (app.isPackaged = false) since there is no feed to check.
+//
+// Feed: https://update.electronjs.org  (free, official, backed by GitHub Releases)
+// To activate: set "repository" in package.json to your GitHub repo URL and publish
+// a tagged GitHub Release (e.g. v1.0.1) with the installer attached.
+
+const isStoreApp = !!process.windowsStore || !!process.mas;
+
+if (!isStoreApp && app.isPackaged) {
+  try {
+    const { autoUpdater } = require('electron');
+    const pkg = require('./package.json');
+
+    // Derive owner/repo from the repository field in package.json
+    const repoUrl = typeof pkg.repository === 'object' ? pkg.repository.url : pkg.repository;
+    const repoMatch = repoUrl && repoUrl.match(/github\.com[/:]([\w.-]+\/[\w.-]+?)(?:\.git)?$/);
+    const repoSlug = repoMatch ? repoMatch[1] : null;
+
+    if (repoSlug) {
+      const platform = process.platform === 'darwin' ? 'darwin' : 'win32';
+      const feedUrl = `https://update.electronjs.org/${repoSlug}/${platform}/${app.getVersion()}`;
+      autoUpdater.setFeedURL({ url: feedUrl });
+
+      // Check immediately on launch, then every 2 hours
+      autoUpdater.checkForUpdates();
+      setInterval(() => autoUpdater.checkForUpdates(), 1000 * 60 * 60 * 2);
+
+      // When the update finishes downloading in the background, notify the renderer.
+      // The top bar will show a pulsing "Update ready" badge. Squirrel also stages
+      // the update on disk, so it applies automatically on the next cold launch even
+      // if the user ignores the badge.
+      autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
+        console.log(`[Updater] Update downloaded: ${releaseName}`);
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('update-ready', { releaseName, releaseNotes });
+        }
+      });
+
+      autoUpdater.on('error', (err) => {
+        // Suppress — common when offline. Don't crash or log noise in normal use.
+        if (!err.message.includes('net::ERR_')) {
+          console.warn('[Updater] Error:', err.message);
+        }
+      });
+    } else {
+      console.warn('[Updater] No valid GitHub repository found in package.json — skipping auto-update.');
+    }
+  } catch (err) {
+    console.warn('[Updater] Failed to initialise:', err.message);
+  }
+}
+
+// ============================================
 // CONFIGURATION
 // ============================================
 const PORT = process.env.PORT || 8888;
@@ -941,6 +998,11 @@ ipcMain.handle('exit-app', () => {
 
 ipcMain.handle('refresh-app', () => {
   if (mainWindow) mainWindow.reload();
+});
+
+ipcMain.handle('apply-update', () => {
+  const { autoUpdater } = require('electron');
+  autoUpdater.quitAndInstall();
 });
 
 ipcMain.handle('switch-to-host-mode', async () => {

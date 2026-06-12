@@ -27,6 +27,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
   exitApp: () => ipcRenderer.invoke('exit-app'),
   refreshApp: () => ipcRenderer.invoke('refresh-app'),
+  // Auto-updater
+  onUpdateReady: (callback) => ipcRenderer.on('update-ready', (_event, info) => callback(info)),
+  applyUpdate: () => ipcRenderer.invoke('apply-update'),
 });
 
 // Log that preload script has loaded
