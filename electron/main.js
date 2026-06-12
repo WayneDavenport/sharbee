@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const path = require('path');
 const http = require('http');
 const express = require('express');
@@ -7,6 +7,67 @@ const Bonjour = require('bonjour-service');
 const os = require('os');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+
+// ============================================
+// SQUIRREL WINDOWS INSTALLER EVENTS
+// ============================================
+// Handle Squirrel events for Windows installer (shortcuts, updates, uninstall)
+if (require('electron-squirrel-startup')) {
+  app.quit();
+}
+
+// Handle Squirrel events manually for proper shortcut creation
+if (process.platform === 'win32') {
+  const squirrelCommand = process.argv[1];
+  
+  if (squirrelCommand) {
+    const handleSquirrelEvent = () => {
+      const appFolder = path.resolve(process.execPath, '..');
+      const rootFolder = path.resolve(appFolder, '..');
+      const updateDotExe = path.resolve(rootFolder, 'Update.exe');
+      const exeName = path.basename(process.execPath);
+
+      const spawn = function(command, args) {
+        let spawnedProcess;
+        try {
+          spawnedProcess = require('child_process').spawn(command, args, { detached: true });
+        } catch (error) {
+          console.error('Squirrel spawn error:', error);
+        }
+        return spawnedProcess;
+      };
+
+      const spawnUpdate = function(args) {
+        return spawn(updateDotExe, args);
+      };
+
+      switch (squirrelCommand) {
+        case '--squirrel-install':
+        case '--squirrel-updated':
+          // Create shortcuts on install/update
+          spawnUpdate(['--createShortcut', exeName]);
+          setTimeout(app.quit, 1000);
+          return true;
+
+        case '--squirrel-uninstall':
+          // Remove shortcuts on uninstall
+          spawnUpdate(['--removeShortcut', exeName]);
+          setTimeout(app.quit, 1000);
+          return true;
+
+        case '--squirrel-obsolete':
+          // App is being replaced, just quit
+          app.quit();
+          return true;
+      }
+    };
+
+    if (handleSquirrelEvent()) {
+      // Squirrel event handled, exit
+      process.exit(0);
+    }
+  }
+}
 
 // ============================================
 // CONFIGURATION
@@ -840,6 +901,48 @@ async function showHostSelectionDialog(hosts) {
 // ============================================
 // IPC HANDLERS
 // ============================================
+// Native dialogs — window.confirm()/alert() break keyboard input in Electron
+// (Chromium bug: character keys stop working after a JS-blocking dialog closes)
+ipcMain.handle('show-confirm', async (event, { message, title = 'Sharbee' }) => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: ['OK', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title,
+    message,
+  });
+  return result.response === 0;
+});
+
+ipcMain.handle('show-alert', async (event, { message, title = 'Sharbee' }) => {
+  await dialog.showMessageBox(mainWindow, {
+    type: 'info',
+    buttons: ['OK'],
+    title,
+    message,
+  });
+});
+
+ipcMain.handle('open-downloads-folder', async () => {
+  const downloadsPath = app.getPath('downloads');
+  await shell.openPath(downloadsPath);
+  return { success: true, path: downloadsPath };
+});
+
+ipcMain.handle('open-folder', async (event, folderPath) => {
+  await shell.openPath(folderPath);
+  return { success: true };
+});
+
+ipcMain.handle('exit-app', () => {
+  app.quit();
+});
+
+ipcMain.handle('refresh-app', () => {
+  if (mainWindow) mainWindow.reload();
+});
+
 ipcMain.handle('switch-to-host-mode', async () => {
   console.log('[IPC] Received request to switch to host mode');
   

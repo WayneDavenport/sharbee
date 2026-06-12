@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 import QRCode from 'qrcode';
+import { alertDialog } from '@/lib/dialogs';
 
 export default function ConnectionInfo() {
     const { isConnected, peers } = useSocket();
@@ -39,7 +40,7 @@ export default function ConnectionInfo() {
 
     const copyToClipboard = (text) => {
         navigator.clipboard.writeText(text);
-        alert('URL copied to clipboard!');
+        alertDialog('URL copied to clipboard!');
     };
 
     return (

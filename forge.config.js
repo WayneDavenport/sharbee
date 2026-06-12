@@ -1,8 +1,10 @@
+const path = require('path');
+
 module.exports = {
   packagerConfig: {
     name: 'Sharbee',
     executableName: 'sharbee',
-    // icon: './assets/icon', // Commented out - add icons later
+    icon: './assets/icons/icon', // Electron Forge automatically picks .ico for Windows, .icns for Mac
     asar: false, // Disabled for debugging - files will be unpacked
     appBundleId: 'com.sharbee.app',
     appCategoryType: 'public.app-category.utilities',
@@ -39,7 +41,12 @@ module.exports = {
         name: 'Sharbee',
         authors: 'Sharbee Team',
         description: 'Local file transfer and chat application',
-        setupExe: 'SharbeeSetup.exe'
+        setupIcon: './assets/icons/icon.ico',
+        loadingGif: './assets/sharbee-loader.gif',
+        iconUrl: 'file://' + path.resolve(__dirname, 'assets/icons/icon.ico'),
+        setupExe: 'SharbeeSetup.exe',
+        // Create desktop and start menu shortcuts
+        setupMsi: undefined,
       },
     },
     {

@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
 import { v4 as uuidv4 } from 'uuid';
+import { alertDialog } from '@/lib/dialogs';
 
 export default function Chat() {
     const { socket, isConnected, peers } = useSocket();
     const [messages, setMessages] = useState([]);
     const [inputMessage, setInputMessage] = useState('');
-    const messagesEndRef = useRef(null);
+    // messagesEndRef removed - no longer needed without auto-scroll
     const [userName, setUserName] = useState('');
 
     useEffect(() => {
@@ -23,54 +24,46 @@ export default function Chat() {
         // Request current history when component mounts
         socket.emit('request-sync');
 
-        // Handle initial sync (full history)
-        socket.on('initial-sync', (data) => {
+        const handleInitialSync = (data) => {
             console.log('Initial sync received:', data);
-            if (data.messages && data.messages.length > 0) {
-                setMessages(data.messages);
-            }
-        });
-
-        // Handle sync response (when requesting fresh state)
-        socket.on('sync-response', (data) => {
+            if (data.messages && data.messages.length > 0) setMessages(data.messages);
+        };
+        const handleSyncResponse = (data) => {
             console.log('Sync response received:', data);
-            if (data.messages) {
-                setMessages(data.messages);
-            }
-        });
+            if (data.messages) setMessages(data.messages);
+        };
+        const handleReceiveMessage = (data) => setMessages(prev => [...prev, data]);
+        const handleHistoryCleared = () => { console.log('History cleared by host'); setMessages([]); };
 
-        socket.on('receive-message', (data) => {
-            setMessages(prev => [...prev, data]);
-        });
-
-        socket.on('history-cleared', () => {
-            console.log('History cleared by host');
-            setMessages([]);
-        });
+        socket.on('initial-sync', handleInitialSync);
+        socket.on('sync-response', handleSyncResponse);
+        socket.on('receive-message', handleReceiveMessage);
+        socket.on('history-cleared', handleHistoryCleared);
 
         return () => {
-            socket.off('initial-sync');
-            socket.off('sync-response');
-            socket.off('receive-message');
-            socket.off('history-cleared');
+            socket.off('initial-sync', handleInitialSync);
+            socket.off('sync-response', handleSyncResponse);
+            socket.off('receive-message', handleReceiveMessage);
+            socket.off('history-cleared', handleHistoryCleared);
         };
     }, [socket]);
 
-    useEffect(() => {
-        scrollToBottom();
-    }, [messages]);
+    // Auto-scroll removed per user request - was causing entire app to scroll
+    // useEffect(() => {
+    //     scrollToBottom();
+    // }, [messages]);
 
-    const scrollToBottom = () => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    };
+    // const scrollToBottom = () => {
+    //     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // };
 
     const sendMessage = (e) => {
         if (e) e.preventDefault();
 
         if (!inputMessage.trim()) return;
-        
+
         if (!socket || !isConnected) {
-            alert('Not connected. Please wait for connection.');
+            alertDialog('Not connected. Please wait for connection.');
             return;
         }
 
@@ -110,7 +103,7 @@ export default function Chat() {
             </div>
 
             {/* Messages */}
-            <div className="flex-1 mb-4 space-y-3 pr-2 min-h-[300px] md:min-h-0 md:overflow-y-auto">
+            <div className="mb-4 space-y-3 pr-2" style={{ minHeight: '12rem', maxHeight: 'calc(100vh - 28rem)', overflowY: 'scroll' }}>
                 {messages.length === 0 ? (
                     <div className="h-full flex items-center justify-center">
                         <p className="text-zinc-500 dark:text-zinc-400 text-center">
@@ -146,7 +139,6 @@ export default function Chat() {
                                 </div>
                             </div>
                         ))}
-                        <div ref={messagesEndRef} />
                     </>
                 )}
             </div>

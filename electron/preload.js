@@ -19,6 +19,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   guestHostUrl: process.env.GUEST_HOST_URL || null,
   // IPC methods for guest mode management
   switchToHostMode: () => ipcRenderer.invoke('switch-to-host-mode'),
+  // Native dialogs (window.confirm/alert break keyboard input in Electron)
+  showConfirm: (message, title) => ipcRenderer.invoke('show-confirm', { message, title }),
+  showAlert: (message, title) => ipcRenderer.invoke('show-alert', { message, title }),
+  // App controls
+  openDownloadsFolder: () => ipcRenderer.invoke('open-downloads-folder'),
+  openFolder: (folderPath) => ipcRenderer.invoke('open-folder', folderPath),
+  exitApp: () => ipcRenderer.invoke('exit-app'),
+  refreshApp: () => ipcRenderer.invoke('refresh-app'),
 });
 
 // Log that preload script has loaded

@@ -18,6 +18,7 @@
   "dependencies": {
     "bonjour-service": "^1.2.1",
     "cors": "^2.8.5",
+    "electron-squirrel-startup": "^1.0.1",
     "express": "^4.21.2",
     "multer": "^2.0.2",
     "next": "16.0.10",
@@ -26,6 +27,7 @@
     "react-dom": "19.2.1",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
+    "update-electron-app": "^3.2.0",
     "uuid": "^13.0.0"
   },
   "devDependencies": {
@@ -37,6 +39,7 @@
     "@tailwindcss/postcss": "^4",
     "concurrently": "^9.1.2",
     "electron": "^34.0.0",
+    "electron-icon-builder": "^2.0.1",
     "eslint": "^9",
     "eslint-config-next": "16.0.10",
     "tailwindcss": "^4",

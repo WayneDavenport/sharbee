@@ -1,17 +1,49 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useSocket } from '@/contexts/SocketContext';
+import { useDownloads } from '@/contexts/DownloadContext';
+import { confirmDialog, alertDialog } from '@/lib/dialogs';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function FileTransfer() {
     const { socket, isConnected, serverUrl } = useSocket();
+    const { addDownload } = useDownloads();
+    const fileInputRef = useRef(null);
     const [files, setFiles] = useState([]);
     const [receivedFiles, setReceivedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
     const [uploadProgress, setUploadProgress] = useState({});
     const [downloadingFiles, setDownloadingFiles] = useState(new Set());
     const [showLargeFileWarning, setShowLargeFileWarning] = useState(false);
+    const [showOwnFiles, setShowOwnFiles] = useState(false); // Toggle to show files user sent
+    const [userName, setUserName] = useState('');
+
+    useEffect(() => {
+        const savedName = localStorage.getItem('userName') || 'Anonymous';
+        setUserName(savedName);
+    }, []);
+
+    // Global menu events: "Import Files" and "Send All"
+    useEffect(() => {
+        const handleImport = () => {
+            fileInputRef.current?.click();
+        };
+        const handleSendAll = () => {
+            setFiles(prev => {
+                const readyFiles = prev.filter(f => f.status === 'ready');
+                readyFiles.forEach(f => sendFile(f));
+                return prev;
+            });
+        };
+        window.addEventListener('sharbee:import-files', handleImport);
+        window.addEventListener('sharbee:send-all', handleSendAll);
+        return () => {
+            window.removeEventListener('sharbee:import-files', handleImport);
+            window.removeEventListener('sharbee:send-all', handleSendAll);
+        };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [socket, isConnected]);
 
     useEffect(() => {
         if (!socket) return;
@@ -22,90 +54,73 @@ export default function FileTransfer() {
         // Request current history when component mounts
         socket.emit('request-sync');
 
-        // Handle initial sync (full history)
-        socket.on('initial-sync', (data) => {
+        const handleInitialSync = (data) => {
             console.log('Initial sync received:', data);
             if (data.files && data.files.length > 0) {
-                const initialFiles = data.files.map(file => ({
-                    id: file.id,
-                    name: file.fileName,
-                    sender: file.sender,
+                setReceivedFiles(data.files.map(file => ({
+                    id: file.id, name: file.fileName, sender: file.sender,
                     downloadUrl: file.downloadUrl || `/download/${file.id}`,
-                    size: file.fileSize,
-                    timestamp: file.uploadedAt
-                }));
-                setReceivedFiles(initialFiles);
+                    size: file.fileSize, timestamp: file.uploadedAt
+                })));
             }
-        });
-
-        // Handle sync response (when requesting fresh state)
-        socket.on('sync-response', (data) => {
+        };
+        const handleSyncResponse = (data) => {
             console.log('Sync response received:', data);
             if (data.files && data.files.length > 0) {
-                const syncedFiles = data.files.map(file => ({
-                    id: file.id,
-                    name: file.fileName,
-                    sender: file.sender,
+                setReceivedFiles(data.files.map(file => ({
+                    id: file.id, name: file.fileName, sender: file.sender,
                     downloadUrl: file.downloadUrl || `/download/${file.id}`,
-                    size: file.fileSize,
-                    timestamp: file.uploadedAt
-                }));
-                setReceivedFiles(syncedFiles);
+                    size: file.fileSize, timestamp: file.uploadedAt
+                })));
             }
-        });
-
-        socket.on('receive-file-offer', (data) => {
+        };
+        const handleFileOffer = (data) => {
             console.log('Receiving file offer:', data.fileName);
             pendingFiles.set(data.id, {
-                id: data.id,
-                name: data.fileName,
-                sender: data.sender,
-                size: data.fileSize,
-                uploadedAt: data.uploadedAt
+                id: data.id, name: data.fileName, sender: data.sender,
+                size: data.fileSize, uploadedAt: data.uploadedAt
             });
-        });
-
-        socket.on('file-upload-progress', (data) => {
-            // Optional: Show upload progress for other users
+        };
+        const handleUploadProgress = (data) => {
             console.log(`File ${data.id} upload progress: ${data.receivedSize} bytes`);
-        });
-
-        socket.on('file-received', (data) => {
+        };
+        const handleFileReceived = (data) => {
             const fileInfo = pendingFiles.get(data.id);
             if (fileInfo) {
                 setReceivedFiles(prev => [...prev, {
-                    id: data.id,
-                    name: data.fileName,
-                    sender: data.sender,
-                    downloadUrl: data.downloadUrl,
-                    size: fileInfo.size,
-                    timestamp: Date.now()
+                    id: data.id, name: data.fileName, sender: data.sender,
+                    downloadUrl: data.downloadUrl, size: fileInfo.size, timestamp: Date.now()
                 }]);
-
                 pendingFiles.delete(data.id);
             }
-        });
-
-        socket.on('file-error', (data) => {
+        };
+        const handleFileError = (data) => {
             console.error('File error:', data.error);
-            alert(`File transfer error: ${data.error}`);
+            alertDialog(`File transfer error: ${data.error}`);
             pendingFiles.delete(data.id);
-        });
-
-        socket.on('history-cleared', () => {
+        };
+        const handleHistoryCleared = () => {
             console.log('History cleared by host');
             setReceivedFiles([]);
             pendingFiles.clear();
-        });
+        };
+
+        socket.on('initial-sync', handleInitialSync);
+        socket.on('sync-response', handleSyncResponse);
+        socket.on('receive-file-offer', handleFileOffer);
+        socket.on('file-upload-progress', handleUploadProgress);
+        socket.on('file-received', handleFileReceived);
+        socket.on('file-error', handleFileError);
+        socket.on('history-cleared', handleHistoryCleared);
 
         return () => {
-            socket.off('initial-sync');
-            socket.off('sync-response');
-            socket.off('receive-file-offer');
-            socket.off('file-upload-progress');
-            socket.off('file-received');
-            socket.off('file-error');
-            socket.off('history-cleared');
+            socket.off('initial-sync', handleInitialSync);
+            socket.off('sync-response', handleSyncResponse);
+            socket.off('receive-file-offer', handleFileOffer);
+            socket.off('file-upload-progress', handleUploadProgress);
+            socket.off('file-received', handleFileReceived);
+            socket.off('file-error', handleFileError);
+            socket.off('history-cleared', handleHistoryCleared);
         };
     }, [socket]);
 
@@ -149,7 +164,7 @@ export default function FileTransfer() {
 
     const sendFile = async (fileObj) => {
         if (!socket || !isConnected) {
-            alert('Not connected to server');
+            alertDialog('Not connected to server');
             return;
         }
 
@@ -270,9 +285,12 @@ export default function FileTransfer() {
             
             // Clean up blob URL after a delay
             setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+
+            // Record in downloads history and show toast
+            addDownload({ name: file.name, size: file.size });
         } catch (error) {
             console.error('Download error:', error);
-            alert('Failed to download file. Please try again.');
+            alertDialog('Failed to download file. Please try again.');
         } finally {
             // Remove from downloading set
             setDownloadingFiles(prev => {
@@ -283,17 +301,17 @@ export default function FileTransfer() {
         }
     };
 
-    const removeReceivedFile = (fileId) => {
-        if (confirm('Remove this file from the queue?')) {
+    const removeReceivedFile = async (fileId) => {
+        if (await confirmDialog('Remove this file from the queue?')) {
             setReceivedFiles(prev => prev.filter(f => f.id !== fileId));
         }
     };
 
-    const clearSentFiles = () => {
+    const clearSentFiles = async () => {
         const sentCount = files.filter(f => f.status === 'sent').length;
         if (sentCount === 0) return;
-        
-        if (confirm(`Clear ${sentCount} sent file(s) from the list?`)) {
+
+        if (await confirmDialog(`Clear ${sentCount} sent file(s) from the list?`)) {
             setFiles(prev => prev.filter(f => f.status !== 'sent'));
         }
     };
@@ -336,6 +354,7 @@ export default function FileTransfer() {
                         }`}
                 >
                     <input
+                        ref={fileInputRef}
                         type="file"
                         id="fileInput"
                         multiple
@@ -361,7 +380,7 @@ export default function FileTransfer() {
 
                 {/* File List */}
                 {files.length > 0 && (
-                    <div className="mt-4 space-y-2 pr-2" style={{ maxHeight: '35vh', overflowY: 'auto' }}>
+                    <div className="mt-4 space-y-2 pr-2" style={{ maxHeight: '30vh', overflowY: 'scroll' }}>
                         {files.map((fileObj) => (
                             <div
                                 key={fileObj.id}
@@ -417,17 +436,32 @@ export default function FileTransfer() {
 
             {/* Received Files */}
             <div className="border-t border-zinc-200 dark:border-zinc-800 pt-6">
-                <h2 className="text-xl font-semibold mb-4 text-zinc-900 dark:text-zinc-50">
-                    Received Files
-                </h2>
+                <div className="flex items-center justify-between mb-4">
+                    <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+                        Received Files
+                    </h2>
+                    {receivedFiles.some(f => f.sender === userName) && (
+                        <button
+                            onClick={() => setShowOwnFiles(!showOwnFiles)}
+                            className="text-xs px-3 py-1.5 bg-zinc-200 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded hover:bg-zinc-300 dark:hover:bg-zinc-600 transition-colors"
+                        >
+                            {showOwnFiles ? 'Hide' : 'Show'} My Files ({receivedFiles.filter(f => f.sender === userName).length})
+                        </button>
+                    )}
+                </div>
 
-                {receivedFiles.length === 0 ? (
-                    <div className="text-center py-8 text-zinc-500 dark:text-zinc-400">
-                        <p>No files received yet</p>
-                    </div>
-                ) : (
-                    <div className="space-y-2 pr-2" style={{ maxHeight: '35vh', overflowY: 'auto' }}>
-                        {receivedFiles.map((file) => (
+                {(() => {
+                    const filteredFiles = showOwnFiles 
+                        ? receivedFiles 
+                        : receivedFiles.filter(file => file.sender !== userName);
+                    
+                    return filteredFiles.length === 0 ? (
+                        <div className="text-center py-8 text-zinc-500 dark:text-zinc-400">
+                            <p>No files received yet</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-2 pr-2" style={{ maxHeight: '30vh', overflowY: 'scroll' }}>
+                            {filteredFiles.map((file) => (
                             <div
                                 key={file.id}
                                 className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 rounded-lg"
@@ -467,9 +501,10 @@ export default function FileTransfer() {
                                     </button>
                                 </div>
                             </div>
-                        ))}
-                    </div>
-                )}
+                            ))}
+                        </div>
+                    );
+                })()}
             </div>
         </div>
     );
