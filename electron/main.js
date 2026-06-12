@@ -85,7 +85,7 @@ const isStoreApp = !!process.windowsStore || !!process.mas;
 if (!isStoreApp && app.isPackaged) {
   try {
     const { autoUpdater } = require('electron');
-    const pkg = require('./package.json');
+    const pkg = require('../package.json');
 
     // Derive owner/repo from the repository field in package.json
     const repoUrl = typeof pkg.repository === 'object' ? pkg.repository.url : pkg.repository;
