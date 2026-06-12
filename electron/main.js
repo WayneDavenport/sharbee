@@ -80,6 +80,19 @@ if (process.platform === 'win32') {
 // To activate: set "repository" in package.json to your GitHub repo URL and publish
 // a tagged GitHub Release (e.g. v1.0.1) with the installer attached.
 
+// Set to false for production releases to silence updater diagnostics.
+// When true, every updater stage is logged to the main-process console AND
+// forwarded to the renderer so it shows up in the app's DevTools console.
+const UPDATER_DEBUG = true;
+
+// Logs an updater status to the terminal and (if debug) to the renderer console.
+function logUpdater(stage, detail) {
+  console.log(`[Updater] ${stage}`, detail ?? '');
+  if (UPDATER_DEBUG && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('updater-status', { stage, detail: detail ?? null });
+  }
+}
+
 const isStoreApp = !!process.windowsStore || !!process.mas;
 
 if (!isStoreApp && app.isPackaged) {
@@ -97,32 +110,36 @@ if (!isStoreApp && app.isPackaged) {
       const feedUrl = `https://update.electronjs.org/${repoSlug}/${platform}/${app.getVersion()}`;
       autoUpdater.setFeedURL({ url: feedUrl });
 
-      // Check immediately on launch, then every 2 hours
-      autoUpdater.checkForUpdates();
-      setInterval(() => autoUpdater.checkForUpdates(), 1000 * 60 * 60 * 2);
+      autoUpdater.on('checking-for-update', () => logUpdater('Checking for update…', feedUrl));
+      autoUpdater.on('update-available', () => logUpdater('Update available — downloading…'));
+      autoUpdater.on('update-not-available', () => logUpdater('No update available (you are on the latest version).'));
 
       // When the update finishes downloading in the background, notify the renderer.
-      // The top bar will show a pulsing "Update ready" badge. Squirrel also stages
-      // the update on disk, so it applies automatically on the next cold launch even
-      // if the user ignores the badge.
+      // The top bar shows a pulsing "Update ready" badge. Squirrel also stages the
+      // update on disk, so it applies on the next cold launch even if ignored.
       autoUpdater.on('update-downloaded', (event, releaseNotes, releaseName) => {
-        console.log(`[Updater] Update downloaded: ${releaseName}`);
+        logUpdater('Update downloaded', releaseName);
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('update-ready', { releaseName, releaseNotes });
         }
       });
 
       autoUpdater.on('error', (err) => {
-        // Suppress — common when offline. Don't crash or log noise in normal use.
-        if (!err.message.includes('net::ERR_')) {
-          console.warn('[Updater] Error:', err.message);
-        }
+        logUpdater('Error', err.message);
       });
+
+      // The window may not exist yet at this point; delay the first check slightly
+      // so early status events have a renderer to land in.
+      setTimeout(() => {
+        logUpdater('Initialising', { version: app.getVersion(), feedUrl });
+        autoUpdater.checkForUpdates();
+      }, 4000);
+      setInterval(() => autoUpdater.checkForUpdates(), 1000 * 60 * 60 * 2);
     } else {
-      console.warn('[Updater] No valid GitHub repository found in package.json — skipping auto-update.');
+      logUpdater('Skipped — no valid GitHub repository in package.json', repoUrl);
     }
   } catch (err) {
-    console.warn('[Updater] Failed to initialise:', err.message);
+    logUpdater('Failed to initialise', err.message);
   }
 }
 

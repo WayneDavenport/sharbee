@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   refreshApp: () => ipcRenderer.invoke('refresh-app'),
   // Auto-updater
   onUpdateReady: (callback) => ipcRenderer.on('update-ready', (_event, info) => callback(info)),
+  onUpdaterStatus: (callback) => ipcRenderer.on('updater-status', (_event, info) => callback(info)),
   applyUpdate: () => ipcRenderer.invoke('apply-update'),
 });
 

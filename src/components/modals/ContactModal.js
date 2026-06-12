@@ -4,7 +4,7 @@ import { useState } from 'react';
 import ModalWrapper from './ModalWrapper';
 
 const WEB3FORMS_ACCESS_KEY = '7ee27a00-4a85-457b-ab9f-30772639f846';
-const CONTACT_EMAIL = 'wayne@mediaq.io';
+const CONTACT_EMAIL = 'support@sharbee.app';
 
 export default function ContactModal({ onClose }) {
     const [submitted, setSubmitted] = useState(false);
@@ -35,7 +35,7 @@ export default function ContactModal({ onClose }) {
         } catch (err) {
             // Likely offline — Sharbee runs on local networks, so this is common
             console.error('Web3Forms submit failed:', err);
-            setError('Could not send. Check your internet connection and try again, or email us directly.');
+            setError('Could not send. Check your internet csnnection and try again, or email us directly.');
         } finally {
             setLoading(false);
         }

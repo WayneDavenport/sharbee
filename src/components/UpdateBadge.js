@@ -13,6 +13,13 @@ export default function UpdateBadge() {
             console.log('[UpdateBadge] Update ready:', info?.releaseName);
             setUpdateInfo(info || {});
         });
+
+        // Mirror main-process updater diagnostics into the DevTools console
+        if (window.electronAPI.onUpdaterStatus) {
+            window.electronAPI.onUpdaterStatus(({ stage, detail }) => {
+                console.log(`[Updater] ${stage}`, detail ?? '');
+            });
+        }
     }, []);
 
     if (!updateInfo) return null;
