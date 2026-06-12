@@ -77,6 +77,12 @@ export default function KebabMenu({ onOpenTroubleshooting, onOpenContact, onOpen
                         <MenuItem icon="🛠️" label="Troubleshooting & Tips" onClick={() => action(onOpenTroubleshooting)} />
                         <MenuItem icon="✉️" label="Contact" onClick={() => action(onOpenContact)} />
                         <MenuItem icon="📄" label="Legal / Disclaimer" onClick={() => action(onOpenLegal)} />
+                        <MenuItem
+                            icon="🌐"
+                            label="Website"
+                            onClick={() => window.open('https://www.mediaq.io', '_blank')}
+                        />
+
                     </div>
 
                     {/* Exit — only in Electron */}
@@ -98,11 +104,10 @@ function MenuItem({ icon, label, onClick, danger = false }) {
     return (
         <button
             onClick={onClick}
-            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-colors text-left ${
-                danger
+            className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm transition-colors text-left ${danger
                     ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30'
                     : 'text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-            }`}
+                }`}
         >
             <span>{icon}</span>
             {label}
