@@ -74,7 +74,7 @@ export default function ContactModal({ onClose }) {
                         <input
                             name="name"
                             required
-                            placeholder="Your name"
+                            placeholder="Your Name"
                             className="w-full px-3 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-lg text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                     </div>
