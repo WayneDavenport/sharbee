@@ -45,6 +45,22 @@ export default function FileTransfer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [socket, isConnected]);
 
+    // Electron streamed-download completion → fire the toast / downloads history
+    useEffect(() => {
+        if (typeof window === 'undefined' || !window.electronAPI?.onDownloadComplete) return;
+        window.electronAPI.onDownloadComplete((info) => {
+            addDownload({ name: info.name, size: info.size, path: info.path });
+        });
+        if (window.electronAPI.onDownloadFailed) {
+            window.electronAPI.onDownloadFailed((info) => {
+                if (info.state !== 'cancelled') {
+                    alertDialog(`Download failed: ${info.name}`);
+                }
+            });
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     useEffect(() => {
         if (!socket) return;
 
@@ -169,7 +185,7 @@ export default function FileTransfer() {
         }
 
         const { id, file } = fileObj;
-        const chunkSize = 64 * 1024; // 64KB chunks
+        const chunkSize = 64 * 1024; // 64KiB — efficient for socket framing
         let offset = 0;
 
         // Update status
@@ -187,19 +203,37 @@ export default function FileTransfer() {
             timestamp: Date.now()
         });
 
-        // Read and send file in chunks
-        while (offset < file.size) {
-            const chunk = file.slice(offset, offset + chunkSize);
-            const arrayBuffer = await chunk.arrayBuffer();
+        try {
+            // Stream the file in chunks. We read each slice straight off disk
+            // (file.slice doesn't load the whole file into memory) and wait for
+            // the host to acknowledge each chunk before sending the next. That
+            // ack-gated loop is our backpressure — it paces the sender to the
+            // host's disk write speed so neither side buffers the whole file.
+            while (offset < file.size) {
+                const chunk = file.slice(offset, offset + chunkSize);
+                const arrayBuffer = await chunk.arrayBuffer();
 
-            socket.emit('send-file-chunk', {
-                id,
-                chunk: arrayBuffer
-            });
+                // emitWithAck resolves when the host has flushed this chunk to disk
+                const res = await socket.emitWithAck('send-file-chunk', {
+                    id,
+                    chunk: arrayBuffer
+                });
 
-            offset += chunkSize;
-            const progress = Math.min(100, Math.round((offset / file.size) * 100));
-            setUploadProgress(prev => ({ ...prev, [id]: progress }));
+                if (res && res.ok === false) {
+                    throw new Error(res.error || 'Host rejected chunk');
+                }
+
+                offset += chunkSize;
+                const progress = Math.min(100, Math.round((offset / file.size) * 100));
+                setUploadProgress(prev => ({ ...prev, [id]: progress }));
+            }
+        } catch (err) {
+            console.error('File transfer failed:', err);
+            setFiles(prev => prev.map(f =>
+                f.id === id ? { ...f, status: 'ready' } : f
+            ));
+            alertDialog(`Transfer failed: ${err.message || 'connection lost'}`);
+            return;
         }
 
         // Notify completion
@@ -249,55 +283,33 @@ export default function FileTransfer() {
     };
 
     const downloadFile = async (file) => {
-        // Check if already downloading
         if (downloadingFiles.has(file.id)) return;
 
-        // Warn about large files
-        const fileSizeInMB = file.size / (1024 * 1024);
-        if (fileSizeInMB > 1 && !downloadingFiles.has(file.id)) {
-            setShowLargeFileWarning(true);
-            setTimeout(() => setShowLargeFileWarning(false), 5000);
-        }
+        const downloadUrl = serverUrl + file.downloadUrl;
+        const isElectron = typeof window !== 'undefined' && window.electronAPI?.downloadFile;
 
         try {
-            // Mark as downloading
-            setDownloadingFiles(prev => new Set(prev).add(file.id));
-
-            // Use the server-provided download URL
-            const downloadUrl = serverUrl + file.downloadUrl;
-            
-            // Fetch the file as a blob (this is where the delay happens for large files)
-            const response = await fetch(downloadUrl);
-            if (!response.ok) {
-                throw new Error('Download failed');
+            if (isElectron) {
+                // Electron: stream to the Downloads folder via the native download
+                // manager (no in-memory buffering). Completion is reported back
+                // through the 'download-complete' IPC event handled in the effect
+                // below, which fires the toast — so we don't addDownload here.
+                window.electronAPI.downloadFile(downloadUrl);
+            } else {
+                // Browser guests: a direct anchor lets the browser stream the file
+                // to disk natively (also no Blob buffering). The download attribute
+                // + Content-Disposition header handle the filename.
+                const a = document.createElement('a');
+                a.href = downloadUrl;
+                a.download = file.name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                addDownload({ name: file.name, size: file.size });
             }
-            
-            const blob = await response.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            
-            // Create download link
-            const a = document.createElement('a');
-            a.href = blobUrl;
-            a.download = file.name;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            // Clean up blob URL after a delay
-            setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
-
-            // Record in downloads history and show toast
-            addDownload({ name: file.name, size: file.size });
         } catch (error) {
             console.error('Download error:', error);
             alertDialog('Failed to download file. Please try again.');
-        } finally {
-            // Remove from downloading set
-            setDownloadingFiles(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(file.id);
-                return newSet;
-            });
         }
     };
 

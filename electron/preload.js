@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   applyUpdate: () => ipcRenderer.invoke('apply-update'),
   // Native right-click context menu (cut/copy/paste/select-all)
   showContextMenu: () => ipcRenderer.invoke('show-context-menu'),
+  // Streamed file downloads (no in-memory buffering)
+  downloadFile: (url) => ipcRenderer.invoke('download-file', url),
+  onDownloadComplete: (callback) => ipcRenderer.on('download-complete', (_e, info) => callback(info)),
+  onDownloadFailed: (callback) => ipcRenderer.on('download-failed', (_e, info) => callback(info)),
 });
 
 // Log that preload script has loaded

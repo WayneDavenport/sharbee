@@ -220,7 +220,7 @@ class MemoryStateManager {
       for (const [fileId, fileData] of this.fileChunks.entries()) {
         if (fileData.uploadedBy === socketId) {
           console.log(`[MemoryState] Cleaning up incomplete file transfer: ${fileId}`);
-          this.fileChunks.delete(fileId);
+          this.abortFileUpload(fileId);
         }
       }
     }
@@ -271,59 +271,89 @@ class MemoryStateManager {
     return peers;
   }
 
-  // Initialize file chunk collection
+  // Initialize a streamed file upload. Chunks are written straight to disk as
+  // they arrive (via a write stream) so host RAM never holds the whole file —
+  // memory stays flat regardless of file size, enabling multi-GB transfers.
   initFileUpload(fileId, metadata, socketId) {
+    const tempDir = path.join(app.getPath('temp'), 'sharbee-files');
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    // Sanitize the filename to avoid path traversal / invalid chars on disk
+    const safeName = String(metadata.fileName || 'file').replace(/[/\\?%*:|"<>]/g, '_');
+    const filePath = path.join(tempDir, `${fileId}-${safeName}`);
+
     this.fileChunks.set(fileId, {
-      chunks: [],
+      stream: fs.createWriteStream(filePath),
+      filePath,
       metadata,
       uploadedBy: socketId,
       receivedSize: 0
     });
   }
 
-  // Add chunk to file
+  // Write a chunk to disk. Returns a promise that resolves once the chunk has
+  // been flushed (or the write buffer has drained), which the socket handler
+  // uses to ack the sender — giving us real backpressure tied to disk speed.
   addFileChunk(fileId, chunk) {
     const fileData = this.fileChunks.get(fileId);
-    if (fileData) {
-      fileData.chunks.push(chunk);
-      fileData.receivedSize += chunk.length;
-      return fileData.receivedSize;
-    }
-    return 0;
+    if (!fileData) return Promise.resolve(0);
+
+    fileData.receivedSize += chunk.length;
+
+    return new Promise((resolve, reject) => {
+      const ok = fileData.stream.write(chunk, (err) => {
+        if (err) return reject(err);
+      });
+      if (ok) {
+        resolve(fileData.receivedSize);
+      } else {
+        // Buffer is full — wait for it to drain before acking (backpressure)
+        fileData.stream.once('drain', () => resolve(fileData.receivedSize));
+      }
+    });
   }
 
-  // Finalize file upload and save to temp directory
+  // Finalize a streamed upload: close the write stream and register metadata.
   async finalizeFileUpload(fileId) {
     const fileData = this.fileChunks.get(fileId);
     if (!fileData) {
       throw new Error('File data not found');
     }
 
-    // Create temp directory for files
-    const tempDir = path.join(app.getPath('temp'), 'sharbee-files');
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
-    }
+    // Close the stream and wait for all buffered data to flush to disk
+    await new Promise((resolve, reject) => {
+      fileData.stream.end((err) => (err ? reject(err) : resolve()));
+    });
 
-    // Save file to disk
-    const filePath = path.join(tempDir, `${fileId}-${fileData.metadata.fileName}`);
-    const buffer = Buffer.concat(fileData.chunks);
-    
-    await fs.promises.writeFile(filePath, buffer);
-    console.log(`[MemoryState] File saved to disk: ${filePath} (${buffer.length} bytes)`);
+    console.log(`[MemoryState] File saved to disk: ${fileData.filePath} (${fileData.receivedSize} bytes)`);
 
-    // Store metadata with file path and download URL
     this.addFile(fileId, {
       ...fileData.metadata,
-      filePath,
-      actualSize: buffer.length,
+      filePath: fileData.filePath,
+      actualSize: fileData.receivedSize,
       downloadUrl: `/download/${fileId}`
     });
 
-    // Clean up chunks from memory
     this.fileChunks.delete(fileId);
 
-    return filePath;
+    return fileData.filePath;
+  }
+
+  // Abort an in-progress upload: destroy the stream and delete the partial file
+  abortFileUpload(fileId) {
+    const fileData = this.fileChunks.get(fileId);
+    if (!fileData) return;
+    try {
+      fileData.stream.destroy();
+      if (fileData.filePath && fs.existsSync(fileData.filePath)) {
+        fs.unlinkSync(fileData.filePath);
+      }
+    } catch (err) {
+      console.error(`[MemoryState] Error aborting upload ${fileId}:`, err.message);
+    }
+    this.fileChunks.delete(fileId);
   }
 
   // Get file path for download
@@ -353,8 +383,10 @@ class MemoryStateManager {
     }
     this.files.clear();
     
-    // Clear in-progress chunks
-    this.fileChunks.clear();
+    // Abort and clean up any in-progress streamed uploads
+    for (const fileId of Array.from(this.fileChunks.keys())) {
+      this.abortFileUpload(fileId);
+    }
     
     console.log(`[MemoryState] Cleared ${messageCount} messages and ${fileCount} files`);
     
@@ -412,6 +444,42 @@ function createWindow() {
     },
     autoHideMenuBar: true,
     title: appMode === 'guest' ? `Sharbee - Connected to ${guestHostInfo?.name}` : 'Sharbee - Local File Transfer',
+  });
+
+  // Stream downloads straight to the Downloads folder via Electron's native
+  // download manager. This writes to disk as bytes arrive — the renderer never
+  // buffers the file in memory (unlike fetch().blob()), so multi-GB downloads
+  // don't blow up the browser heap.
+  mainWindow.webContents.session.on('will-download', (event, item) => {
+    const downloadsPath = app.getPath('downloads');
+    let savePath = path.join(downloadsPath, item.getFilename());
+
+    // Avoid clobbering an existing file: append (1), (2), …
+    if (fs.existsSync(savePath)) {
+      const ext = path.extname(savePath);
+      const base = path.basename(savePath, ext);
+      let i = 1;
+      while (fs.existsSync(path.join(downloadsPath, `${base} (${i})${ext}`))) i++;
+      savePath = path.join(downloadsPath, `${base} (${i})${ext}`);
+    }
+    item.setSavePath(savePath); // skip the Save As dialog and stream to disk
+
+    item.once('done', (e, state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        if (state === 'completed') {
+          mainWindow.webContents.send('download-complete', {
+            name: path.basename(savePath),
+            size: item.getTotalBytes(),
+            path: savePath,
+          });
+        } else {
+          mainWindow.webContents.send('download-failed', {
+            name: item.getFilename(),
+            state,
+          });
+        }
+      }
+    });
   });
 
   // Load the app
@@ -718,21 +786,29 @@ async function startServer() {
       console.log(`[Socket] File offer: ${metadata.fileName} (${metadata.fileSize} bytes) from ${metadata.sender}`);
     });
 
-    // Handle file chunks (memory-efficient)
-    socket.on('send-file-chunk', async (data) => {
+    // Handle file chunks (streamed to disk with backpressure).
+    // The third arg `ack` is a Socket.io acknowledgement callback — we only
+    // call it once the chunk has been flushed/drained to disk, which throttles
+    // the sender to disk write speed and prevents the socket buffer flooding.
+    socket.on('send-file-chunk', async (data, ack) => {
       const { id: fileId, chunk } = data;
-      
+
       try {
-        const receivedSize = memoryState.addFileChunk(fileId, Buffer.from(chunk));
-        
-        // Broadcast progress to other clients (optional, for UI feedback)
+        const receivedSize = await memoryState.addFileChunk(fileId, Buffer.from(chunk));
+
+        // Broadcast progress to other clients (for UI feedback)
         socket.broadcast.emit('file-upload-progress', {
           id: fileId,
           receivedSize
         });
+
+        // Tell the sender this chunk is safely written — send the next one
+        if (typeof ack === 'function') ack({ ok: true, receivedSize });
       } catch (error) {
         console.error(`[Socket] Error processing chunk for file ${fileId}:`, error);
+        memoryState.abortFileUpload(fileId);
         socket.emit('file-error', { id: fileId, error: error.message });
+        if (typeof ack === 'function') ack({ ok: false, error: error.message });
       }
     });
 
@@ -1020,6 +1096,12 @@ ipcMain.handle('refresh-app', () => {
 ipcMain.handle('apply-update', () => {
   const { autoUpdater } = require('electron');
   autoUpdater.quitAndInstall();
+});
+
+ipcMain.handle('download-file', (event, url) => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.downloadURL(url);
+  }
 });
 
 ipcMain.handle('show-context-menu', (event) => {
