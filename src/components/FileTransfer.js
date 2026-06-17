@@ -10,6 +10,10 @@ export default function FileTransfer() {
     const { socket, isConnected, serverUrl } = useSocket();
     const { addDownload } = useDownloads();
     const fileInputRef = useRef(null);
+    // Maps fileId → filename for files currently being downloaded; used by the
+    // onDownloadComplete effect to clear the button even though it closes over
+    // a stale `downloadingFiles` set.
+    const downloadingFileNamesRef = useRef(new Map());
     const [files, setFiles] = useState([]);
     const [receivedFiles, setReceivedFiles] = useState([]);
     const [isDragging, setIsDragging] = useState(false);
@@ -50,6 +54,17 @@ export default function FileTransfer() {
         if (typeof window === 'undefined' || !window.electronAPI?.onDownloadComplete) return;
         window.electronAPI.onDownloadComplete((info) => {
             addDownload({ name: info.name, size: info.size, path: info.path });
+            // Clear the button for whichever file this download belongs to.
+            setDownloadingFiles(prev => {
+                const s = new Set(prev);
+                for (const [id, name] of downloadingFileNamesRef.current.entries()) {
+                    if (name === info.name) {
+                        downloadingFileNamesRef.current.delete(id);
+                        s.delete(id);
+                    }
+                }
+                return s;
+            });
         });
         if (window.electronAPI.onDownloadFailed) {
             window.electronAPI.onDownloadFailed((info) => {
@@ -282,23 +297,36 @@ export default function FileTransfer() {
         }
     };
 
-    const downloadFile = async (file) => {
+    const downloadFile = (file) => {
         if (downloadingFiles.has(file.id)) return;
 
         const downloadUrl = serverUrl + file.downloadUrl;
         const isElectron = typeof window !== 'undefined' && window.electronAPI?.downloadFile;
 
+        // Disable the button immediately to prevent double-clicks.
+        setDownloadingFiles(prev => new Set(prev).add(file.id));
+        downloadingFileNamesRef.current.set(file.id, file.name);
+
+        const clearDownloading = () => {
+            downloadingFileNamesRef.current.delete(file.id);
+            setDownloadingFiles(prev => {
+                const s = new Set(prev);
+                s.delete(file.id);
+                return s;
+            });
+        };
+
         try {
             if (isElectron) {
                 // Electron: stream to the Downloads folder via the native download
-                // manager (no in-memory buffering). Completion is reported back
-                // through the 'download-complete' IPC event handled in the effect
-                // below, which fires the toast — so we don't addDownload here.
+                // manager. Completion is reported via the 'download-complete' IPC
+                // event (handled in the effect below, which also fires the toast).
+                // The effect clears the button via downloadingFileNamesRef.
+                // 10 s fallback in case the event never fires.
                 window.electronAPI.downloadFile(downloadUrl);
+                setTimeout(clearDownloading, 10000);
             } else {
-                // Browser guests: a direct anchor lets the browser stream the file
-                // to disk natively (also no Blob buffering). The download attribute
-                // + Content-Disposition header handle the filename.
+                // Browser guests: a direct anchor streams the file natively.
                 const a = document.createElement('a');
                 a.href = downloadUrl;
                 a.download = file.name;
@@ -306,9 +334,11 @@ export default function FileTransfer() {
                 a.click();
                 document.body.removeChild(a);
                 addDownload({ name: file.name, size: file.size });
+                setTimeout(clearDownloading, 2000);
             }
         } catch (error) {
             console.error('Download error:', error);
+            clearDownloading();
             alertDialog('Failed to download file. Please try again.');
         }
     };
@@ -498,7 +528,7 @@ export default function FileTransfer() {
                                                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                                 </svg>
-                                                <span>Loading...</span>
+                                                <span>Starting…</span>
                                             </>
                                         ) : (
                                             'Download'
