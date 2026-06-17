@@ -1022,6 +1022,17 @@ ipcMain.handle('apply-update', () => {
   autoUpdater.quitAndInstall();
 });
 
+ipcMain.handle('show-context-menu', (event) => {
+  const { Menu, MenuItem } = require('electron');
+  const menu = new Menu();
+  menu.append(new MenuItem({ label: 'Cut',        role: 'cut' }));
+  menu.append(new MenuItem({ label: 'Copy',       role: 'copy' }));
+  menu.append(new MenuItem({ label: 'Paste',      role: 'paste' }));
+  menu.append(new MenuItem({ type: 'separator' }));
+  menu.append(new MenuItem({ label: 'Select All', role: 'selectAll' }));
+  menu.popup({ window: mainWindow });
+});
+
 ipcMain.handle('switch-to-host-mode', async () => {
   console.log('[IPC] Received request to switch to host mode');
   

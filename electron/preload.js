@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onUpdateReady: (callback) => ipcRenderer.on('update-ready', (_event, info) => callback(info)),
   onUpdaterStatus: (callback) => ipcRenderer.on('updater-status', (_event, info) => callback(info)),
   applyUpdate: () => ipcRenderer.invoke('apply-update'),
+  // Native right-click context menu (cut/copy/paste/select-all)
+  showContextMenu: () => ipcRenderer.invoke('show-context-menu'),
 });
 
 // Log that preload script has loaded

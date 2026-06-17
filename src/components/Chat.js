@@ -151,6 +151,13 @@ export default function Chat() {
                     onChange={(e) => setInputMessage(e.target.value)}
                     placeholder={isConnected ? "Type a message..." : "Reconnecting..."}
                     className="flex-1 px-4 py-3 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-50"
+                    onContextMenu={(e) => {
+                        if (typeof window !== 'undefined' && window.electronAPI?.showContextMenu) {
+                            e.preventDefault();
+                            window.electronAPI.showContextMenu();
+                        }
+                        // Browser guests: native context menu fires automatically
+                    }}
                 />
                 <button
                     type="submit"

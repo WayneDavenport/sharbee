@@ -44,24 +44,33 @@ export default function Home() {
     }
   }, []);
 
-  // Focus the input when the app first loads with no saved name
+  // Focus the input on first load when there is no saved name.
+  // Only run on desktop Electron — programmatic focus on mobile browsers can
+  // interfere with the soft keyboard's input event binding, which is what
+  // caused the "Continue button stays disabled" bug on mobile certification.
   useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
+    if (!isElectron) return;
     const savedName = localStorage.getItem('userName');
     if (!savedName) {
-      setTimeout(() => { window.focus(); nameInputRef.current?.focus(); }, 50);
+      setTimeout(() => nameInputRef.current?.focus(), 50);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleNameSubmit = (e) => {
     e.preventDefault();
-    if (userName.trim()) {
-      prevNameRef.current = userName.trim();
-      localStorage.setItem('userName', userName.trim());
+    // Read from React state first; fall back to DOM value for mobile browsers
+    // where IME/autocomplete can update the DOM without triggering React's onChange.
+    const name = (userName || nameInputRef.current?.value || '').trim();
+    if (name) {
+      prevNameRef.current = name;
+      setUserName(name); // sync state in case it lagged behind the DOM
+      localStorage.setItem('userName', name);
       setIsNameSet(true);
       const { getSocket } = require('@/lib/socket');
       const socket = getSocket();
-      socket.emit('register-peer', { name: userName.trim() });
+      socket.emit('register-peer', { name });
     }
   };
 
@@ -95,13 +104,15 @@ export default function Home() {
                 type="text"
                 value={userName}
                 onChange={(e) => setUserName(e.target.value)}
+                onInput={(e) => setUserName(e.target.value)}
                 placeholder="Your name"
+                autoComplete="name"
                 className="w-full px-4 py-3 bg-zinc-100 dark:bg-zinc-800 border border-zinc-300 dark:border-zinc-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-zinc-900 dark:text-zinc-50"
               />
             </div>
             <button
               type="submit"
-              disabled={!userName.trim()}
+              disabled={!userName.trim() && !nameInputRef.current?.value?.trim()}
               className="w-full px-6 py-3 bg-linear-to-r from-blue-600 to-indigo-600 text-white rounded-xl hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all font-medium shadow-lg"
             >
               Continue
@@ -126,7 +137,7 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-linear-to-br from-blue-50 to-indigo-100 dark:from-zinc-900 dark:to-zinc-800">
       {/* ── Slim top bar ─────────────────────────────────────────────────── */}
-      <header className="bg-white/80 dark:bg-zinc-900/80 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 px-4 md:px-8 py-2">
+      <header className="sticky top-0 z-40 bg-white/80 dark:bg-zinc-900/80 backdrop-blur border-b border-zinc-200 dark:border-zinc-800 px-4 md:px-8 py-2">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
           {/* Brand */}
           <div className="flex items-center gap-3">
@@ -189,6 +200,7 @@ export default function Home() {
               onOpenTroubleshooting={() => setModal('troubleshooting')}
               onOpenContact={() => setModal('contact')}
               onOpenLegal={() => setModal('legal')}
+              onChangeName={() => setIsNameSet(false)}
             />
           </div>
         </div>

@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 
 const isElectron = typeof window !== 'undefined' && window.electronAPI?.isElectron;
 
-export default function KebabMenu({ onOpenTroubleshooting, onOpenContact, onOpenLegal }) {
+export default function KebabMenu({ onOpenTroubleshooting, onOpenContact, onOpenLegal, onChangeName }) {
     const [open, setOpen] = useState(false);
     const ref = useRef(null);
 
@@ -64,10 +64,10 @@ export default function KebabMenu({ onOpenTroubleshooting, onOpenContact, onOpen
                     {/* Actions group */}
                     <div className="px-3 pt-3 pb-1">
                         <p className="text-xs font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wide px-1 mb-1">Actions</p>
+                        <MenuItem icon="✏️" label="Change Name" onClick={() => action(onChangeName)} />
                         <MenuItem icon="📂" label="Import Files" onClick={importFiles} />
                         <MenuItem icon="🚀" label="Send All" onClick={sendAll} />
                         <MenuItem icon="🔄" label="Refresh App" onClick={refresh} />
-                        {/* <MenuItem icon="🌐" label="Website" onClick={() => window.open('https://sharbee.app', '_blank')} /> */}
                     </div>
 
                     <div className="border-t border-zinc-100 dark:border-zinc-800 mx-3 my-1" />
