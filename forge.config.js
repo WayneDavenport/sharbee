@@ -78,7 +78,7 @@ module.exports = {
           packageDisplayName: 'Sharbee',
           appDisplayName: 'Sharbee',
           packageDescription: 'Local file transfer and chat over Wi-Fi',
-          packageVersion: '1.0.0.0',
+          packageVersion: '1.0.1.0',
 
           // Windows 10 1809 (Oct 2018) is the minimum that natively supports MSIX.
           // The Store rejects anything targeting <= 10.0.17134.0 (1803, Apr 2018).

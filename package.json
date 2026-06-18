@@ -13,11 +13,11 @@
     "start": "NODE_ENV=production node server.js",
     "lint": "eslint",
     "electron:dev": "electron .",
-    "electron:build": "npm run build && electron-forge make",
+    "electron:build": "npm run make",
     "electron:start": "electron-forge start",
-    "package": "npm run build && electron-forge package",
+    "package": "npm run clean && npm run build && electron-forge package",
     "clean": "node scripts/clean.js",
-    "make": "npm run clean && npm run gen:msix-assets && electron-forge make",
+    "make": "npm run clean && npm run build && npm run gen:msix-assets && electron-forge make",
     "gen:msix-assets": "node scripts/gen-msix-assets.js"
   },
   "dependencies": {
